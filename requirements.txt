@@ -1,0 +1,6 @@
+twitchio
+httpx
+pyyaml
+python-dotenv
+aiosqlite
+pytest

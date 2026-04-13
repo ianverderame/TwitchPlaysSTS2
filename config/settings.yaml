@@ -1,0 +1,18 @@
+# TwitchPlaysSTS2 Configuration
+# All secrets belong in .env — this file is safe to commit
+
+twitch:
+  channel: ""           # Your Twitch channel name
+
+vote:
+  duration_seconds: 30  # How long each voting window stays open
+
+game:
+  poll_interval_seconds: 1  # How often to check STS2 game state
+
+api:
+  sts2mcp_base_url: "http://localhost:8080"     # STS2MCP mod REST API
+  sts2_menu_base_url: "http://localhost:8081"   # STS2-MenuControl mod REST API
+
+database:
+  path: "data/game_history.db"
