@@ -11,7 +11,7 @@ KNOWN_STATES: dict[str, list[str]] = {
     "monster":     ["1", "2", "3", "4", "5", "end"],  # combat encounter
     "hand_select": ["1", "2", "3", "4", "5"],          # select a card from hand (card effect)
     "card_reward": ["1", "2", "3"],
-    "map":         ["left", "right"],
+    "map":         ["1", "2", "3", "4", "5"],  # node index — exact count unverified; trim via live testing
     "event":       ["1", "2", "3"],
 }
 

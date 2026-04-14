@@ -6,6 +6,7 @@ from twitchio import eventsub
 from twitchio.ext import commands
 
 from bot.vote_manager import VoteManager
+from game.actions import build_api_body
 from game.api_client import STS2Client
 from game.events import GameEndedEvent, GameEvent, GameStartedEvent, VoteNeededEvent
 from game.options import options_for_state
@@ -51,7 +52,7 @@ class TwitchBot(commands.Bot):
         self._owner_refresh_token = config["twitch"]["owner_refresh_token"]
 
         self._event_queue = event_queue
-        self._game_client = game_client  # unused in #4; seam for #5 action execution
+        self._game_client = game_client
         self.vote_manager = VoteManager(config["vote"]["duration_seconds"])
 
         super().__init__(
@@ -128,9 +129,31 @@ class TwitchBot(commands.Bot):
                         options=options,
                         state_summary=event.state.summary(),
                     )
-                    logger.info("Vote result: %s", winner)
-                    # In #5: replace the line above with:
-                    # await self._game_client.post_action(winner)
+
+                    try:
+                        body = build_api_body(event.state, winner)
+                    except ValueError:
+                        logger.error(
+                            "No API mapping for state=%s winner=%s — skipping action",
+                            event.state.state_type,
+                            winner,
+                        )
+                        self._event_queue.task_done()
+                        continue
+
+                    result = await self._game_client.post_action(body)
+                    if result is None:
+                        logger.warning("Action POST failed, retrying once...")
+                        result = await self._game_client.post_action(body)
+                        if result is None:
+                            logger.error(
+                                "Action POST failed twice for body=%s — system may be stuck",
+                                body,
+                            )
+                        else:
+                            logger.info("Action executed (retry): %s → %s", winner, result)
+                    else:
+                        logger.info("Action executed: %s → %s", winner, result)
 
                 self._event_queue.task_done()
 
