@@ -4,17 +4,15 @@
 `PoC`
 
 ## Recently Completed
-- Twitch bot account (verdybot) created and credentials configured
-- Twitch CLI installed, OAuth token generated with chat:read + chat:edit scopes
-- Main branch pushed to origin
+- #2 — PoC Bot Implementation: bot connects to Twitch, posts "Bot is online!", pings STS2MCP API, responds to `!test`
 
 ## Active Issue
-#2 — PoC Bot Implementation (`feature/poc-bot`)
+None — #2 complete, ready for #3
 
 ## Up Next
-1. #2 — PoC Bot Implementation (active branch: `feature/poc-bot`)
-2. #3 — PoC: Game State Polling Loop
-3. #4 — PoC: Basic Vote Window
+1. #3 — PoC: Game State Polling Loop
+2. #4 — PoC: Basic Vote Window
+3. #5 — PoC: First Game Action Execution
 
 ## Key Decisions
 - Bot and game run on same PC (localhost API)
