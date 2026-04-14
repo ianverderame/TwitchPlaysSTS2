@@ -12,7 +12,9 @@
 #2 — PoC Bot Implementation (`feature/poc-bot`)
 
 ## Up Next
-1. Build issue backlog for post-PoC features
+1. #2 — PoC Bot Implementation (active branch: `feature/poc-bot`)
+2. #3 — PoC: Game State Polling Loop
+3. #4 — PoC: Basic Vote Window
 
 ## Key Decisions
 - Bot and game run on same PC (localhost API)
