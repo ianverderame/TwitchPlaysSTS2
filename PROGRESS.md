@@ -4,17 +4,15 @@
 `PoC`
 
 ## Recently Completed
-- PRD written and posted as GitHub issue #1
-- GitHub labels, milestones, and issue template created
 - Twitch bot account (verdybot) created and credentials configured
 - Twitch CLI installed, OAuth token generated with chat:read + chat:edit scopes
-- `scripts/verify_twitch.py` written and passing
+- Main branch pushed to origin
 
 ## Active Issue
-None
+#2 — PoC Bot Implementation (`feature/poc-bot`)
 
 ## Up Next
-1. Implement PoC bot (issue to be created)
+1. Build issue backlog for post-PoC features
 
 ## Key Decisions
 - Bot and game run on same PC (localhost API)
