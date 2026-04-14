@@ -48,6 +48,7 @@ TwitchPlaysSTS2/
 - **No scope creep.** If related work is identified that falls outside the active issue, create a new GitHub Issue for it and stop there. Do not implement it in the current session.
 - **Check `PROGRESS.md` first.** At the start of every session, read `PROGRESS.md` to identify the active issue before doing anything else.
 - **No commits without explicit user request.** Never run `git commit` or `git push` unless the user explicitly asks.
+- **Branch naming:** `issue-{number}/{short-description}` (e.g. `issue-2/poc-bot`). One branch per issue. Branch off `main`.
 
 ## Coding Conventions
 
