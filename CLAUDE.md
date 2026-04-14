@@ -28,26 +28,13 @@ A "Twitch Plays" bot for Slay the Spire 2. The streamer plays STS2 on PC and str
 - **STS2MCP**: https://github.com/Gennadiyev/STS2MCP — full game state + actions via REST on `localhost:8080`
 - **STS2-MenuControl**: https://github.com/L4ntern0/STS2-MenuControl — menu interactions via REST on `localhost:8081`
 
-## Project Structure
-
-```
-TwitchPlaysSTS2/
-├── .claude/           # Claude Code config and custom commands
-├── bot/               # Twitch client, vote manager, command parser
-├── game/              # STS2 API client, game state models, game loop
-├── db/                # SQLite logging
-├── config/            # settings.yaml (safe to commit)
-├── .env               # secrets — never commit (see .env.example)
-├── main.py            # entry point
-└── requirements.txt
-```
-
 ## Session Rules
 
 - **One issue at a time.** Each session works on exactly one active GitHub Issue. Do not start, plan, or implement work outside that issue's scope.
 - **No scope creep.** If related work is identified that falls outside the active issue, create a new GitHub Issue for it and stop there. Do not implement it in the current session.
 - **Check `PROGRESS.md` first.** At the start of every session, read `PROGRESS.md` to identify the active issue before doing anything else.
 - **No commits without explicit user request.** Never run `git commit` or `git push` unless the user explicitly asks.
+- **End of session:** Run `/end-session` when the active issue's acceptance criteria are met.
 - **Branch naming:** `issue-{number}/{short-description}` (e.g. `issue-2/poc-bot`). One branch per issue. Branch off `main`.
 
 ## Coding Conventions

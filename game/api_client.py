@@ -8,20 +8,19 @@ logger = logging.getLogger(__name__)
 class STS2Client:
     def __init__(self, base_url: str) -> None:
         self._base_url = base_url.rstrip("/")
+        self._http = httpx.AsyncClient(timeout=5.0)
 
-    async def ping(self) -> bool:
-        """Ping the STS2MCP API. Returns True on success, False on failure."""
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        await self._http.aclose()
+
+    async def get_state(self) -> dict | None:
+        """Fetch current game state from STS2MCP. Returns parsed JSON or None on failure."""
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(f"{self._base_url}/state")
+            response = await self._http.get(f"{self._base_url}/api/v1/singleplayer")
             if response.is_success:
-                logger.info("STS2MCP API reachable at %s", self._base_url)
-                return True
+                return response.json()
             logger.warning("STS2MCP API returned status %s", response.status_code)
-            return False
-        except httpx.ConnectError:
-            logger.warning("STS2MCP API not reachable at %s — is STS2 running?", self._base_url)
-            return False
-        except httpx.TimeoutException:
-            logger.warning("STS2MCP API timed out at %s", self._base_url)
-            return False
+            return None
+        except (httpx.ConnectError, httpx.TimeoutException):
+            return None
