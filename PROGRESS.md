@@ -4,17 +4,15 @@
 `PoC`
 
 ## Recently Completed
-- PRD written and posted as GitHub issue #1
-- GitHub labels, milestones, and issue template created
-- Twitch bot account (verdybot) created and credentials configured
-- Twitch CLI installed, OAuth token generated with chat:read + chat:edit scopes
-- `scripts/verify_twitch.py` written and passing
+- #2 — PoC Bot Implementation: bot connects to Twitch, posts "Bot is online!", pings STS2MCP API, responds to `!test`
 
 ## Active Issue
-None
+None — #2 complete, ready for #3
 
 ## Up Next
-1. Implement PoC bot (issue to be created)
+1. #3 — PoC: Game State Polling Loop
+2. #4 — PoC: Basic Vote Window
+3. #5 — PoC: First Game Action Execution
 
 ## Key Decisions
 - Bot and game run on same PC (localhost API)
