@@ -25,7 +25,7 @@ A "Twitch Plays" bot for Slay the Spire 2. The streamer plays STS2 on PC and str
 
 ## External Mods (must be installed in STS2 before running)
 
-- **STS2MCP**: https://github.com/Gennadiyev/STS2MCP — full game state + actions via REST on `localhost:8080`
+- **STS2MCP**: https://github.com/Gennadiyev/STS2MCP — full game state + actions via REST on `localhost:15526`
 - **STS2-MenuControl**: https://github.com/L4ntern0/STS2-MenuControl — menu interactions via REST on `localhost:8081`
 
 ## Session Rules
@@ -36,6 +36,12 @@ A "Twitch Plays" bot for Slay the Spire 2. The streamer plays STS2 on PC and str
 - **No commits without explicit user request.** Never run `git commit` or `git push` unless the user explicitly asks.
 - **End of session:** Run `/end-session` when the active issue's acceptance criteria are met.
 - **Branch naming:** `issue-{number}/{short-description}` (e.g. `issue-2/poc-bot`). One branch per issue. Branch off `main`.
+
+## Running the Bot
+
+- Use `python3 main.py` (not `python` — that command is not found on this machine)
+- Claude runs and monitors the bot during testing sessions; the user focuses on the game
+- TwitchIO logs a non-fatal OSError about port 4343 on startup — this is expected and can be ignored
 
 ## Coding Conventions
 
