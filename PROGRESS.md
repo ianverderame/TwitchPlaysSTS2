@@ -7,7 +7,7 @@
 - #2 — PoC Bot Implementation: bot connects to Twitch, posts "Bot is online!", pings STS2MCP API, responds to `!test`
 
 ## Active Issue
-None — #2 complete, ready for #3
+None — #2 merged (PR #10), ready for #3
 
 ## Up Next
 1. #3 — PoC: Game State Polling Loop
