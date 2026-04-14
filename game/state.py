@@ -3,6 +3,11 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
+# Denylist of state_types that do NOT require player input.
+# Start minimal — unknown states trigger votes and surface via options.py warnings during testing.
+# Add entries here as non-input states are discovered through live testing.
+IDLE_STATES: frozenset[str] = frozenset({"menu", "game_over", "unknown", "rewards"})
+
 
 @dataclass
 class GameState:
@@ -33,6 +38,10 @@ class GameState:
             player_hp=player.get("hp"),
             player_max_hp=player.get("max_hp"),
         )
+
+    def requires_player_input(self) -> bool:
+        """Return True when the game state needs a player decision."""
+        return self.state_type not in IDLE_STATES
 
     def summary(self) -> str:
         """One-line description of current state for terminal logging."""

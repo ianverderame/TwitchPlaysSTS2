@@ -5,6 +5,7 @@ import sys
 from bot.client import TwitchBot
 from config.loader import load_config
 from game.api_client import STS2Client
+from game.events import GameEvent
 from game.polling import poll_game_state
 
 logging.basicConfig(
@@ -35,9 +36,12 @@ async def main() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     interval = config["game"]["poll_interval_seconds"]
+    event_queue: asyncio.Queue[GameEvent] = asyncio.Queue()
 
-    async with TwitchBot(config) as bot:
-        poll_task = asyncio.create_task(poll_game_state(game_client, interval))
+    async with TwitchBot(config, event_queue, game_client) as bot:
+        poll_task = asyncio.create_task(
+            poll_game_state(game_client, interval, event_queue)
+        )
         try:
             await bot.start()
         finally:
