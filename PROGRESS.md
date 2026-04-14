@@ -4,19 +4,17 @@
 `PoC`
 
 ## Recently Completed
+- #21 — Stale vote queue: pre-window + post-window state checks in `_event_runner`; stale votes discarded with WARNING log; live-tested through event→map→monster transition
 - #19 — Combat: target entity_id for play_card: enemies captured in GameState, auto-target first enemy, fresh state re-fetched at action time, live-tested (Strike targeting Nibbit)
 - #5 — PoC: First Game Action Execution: vote winner sent to STS2MCP API, random fallback on no votes/tie, retry on API failure, live-tested end-to-end
-- #4 — PoC: Basic Vote Window: typed event queue, 10s vote window, KNOWN_STATES registry, game start/end announcements
-- #3 — PoC: Game State Polling Loop: 1s poll of STS2MCP, state_type transitions logged, clean Ctrl+C shutdown
 
 ## Active Issue
-None — #19 complete
+None — #21 complete
 
 ## Up Next
-1. #21 — Stale vote queue: discard votes when state has moved on (blocker for clean UX)
-2. #11 — Detect within-state game changes (re-queue vote after each card play)
-3. #6 — STS2-MenuControl Integration
-4. #17 — Catalog full game state_type map and handle post-run states
+1. #11 — Detect within-state game changes (re-queue vote after each card play)
+2. #6 — STS2-MenuControl Integration
+3. #17 — Catalog full game state_type map and handle post-run states
 
 ## Key Decisions
 - Bot and game run on same PC (localhost API)

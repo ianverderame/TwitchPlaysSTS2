@@ -123,6 +123,23 @@ class TwitchBot(commands.Bot):
                     )
 
                 elif isinstance(event, VoteNeededEvent):
+                    # Check 1: discard if the game has already moved on since this
+                    # event was queued (common during rapid floor-0 transitions).
+                    pre_vote_data = await self._game_client.get_state()
+                    if pre_vote_data:
+                        try:
+                            pre_vote_state = GameState.from_api_response(pre_vote_data)
+                            if pre_vote_state.state_type != event.state.state_type:
+                                logger.warning(
+                                    "Discarding stale vote: queued for '%s' but game is now '%s'",
+                                    event.state.state_type,
+                                    pre_vote_state.state_type,
+                                )
+                                self._event_queue.task_done()
+                                continue
+                        except ValueError:
+                            pass  # Can't parse fresh state — proceed with the vote anyway
+
                     options = options_for_state(event.state)
                     winner = await self.vote_manager.run_window(
                         broadcaster=broadcaster,
@@ -141,6 +158,17 @@ class TwitchBot(commands.Bot):
                             action_state = event.state
                     else:
                         action_state = event.state
+
+                    # Check 2: discard if the game moved on while the vote window
+                    # was open (e.g. state changed during the 10-second window).
+                    if action_state.state_type != event.state.state_type:
+                        logger.warning(
+                            "Discarding stale vote result: queued for '%s' but game is now '%s'",
+                            event.state.state_type,
+                            action_state.state_type,
+                        )
+                        self._event_queue.task_done()
+                        continue
 
                     try:
                         body = build_api_body(action_state, winner)
