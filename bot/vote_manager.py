@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 from collections import Counter
 
 import twitchio
@@ -43,10 +44,11 @@ class VoteManager:
         bot_id: str,
         options: list[str],
         state_summary: str,
-    ) -> str | None:
+    ) -> str:
         """Open a vote window, collect votes, tally, announce winner.
 
-        Returns the winning choice string, or None if no votes were cast.
+        Always returns a winning choice string. If no votes were cast or votes
+        are tied, a winner is chosen randomly and chat is notified.
         """
         self._votes = {}
         self._options = frozenset(options)
@@ -65,11 +67,17 @@ class VoteManager:
         self._open = False
         logger.info("Vote window closed. %d vote(s) cast.", len(self._votes))
 
-        winner = self._tally()
+        winner, was_random, was_tie = self._tally(options)
 
-        if winner is None:
+        if was_random:
             await broadcaster.send_message(
-                message="Vote closed — no votes received.",
+                message=f"Vote closed — no votes, random pick: !{winner}",
+                sender=bot_id,
+                token_for=bot_id,
+            )
+        elif was_tie:
+            await broadcaster.send_message(
+                message=f"Vote closed! Tie broken randomly: !{winner}",
                 sender=bot_id,
                 token_for=bot_id,
             )
@@ -83,8 +91,24 @@ class VoteManager:
 
         return winner
 
-    def _tally(self) -> str | None:
+    def _tally(self, options: list[str]) -> tuple[str, bool, bool]:
+        """Return (winner, was_random, was_tie).
+
+        was_random: True when no votes were cast (winner chosen from full options list).
+        was_tie: True when multiple options share the top vote count (winner chosen randomly among them).
+        """
         if not self._votes:
-            return None
+            winner = random.choice(options)
+            logger.info("No votes cast — random fallback: %s", winner)
+            return winner, True, False
+
         counts = Counter(self._votes.values())
-        return counts.most_common(1)[0][0]
+        max_count = counts.most_common(1)[0][1]
+        tied = [choice for choice, count in counts.items() if count == max_count]
+
+        if len(tied) > 1:
+            winner = random.choice(tied)
+            logger.info("Tie between %s — random winner: %s", tied, winner)
+            return winner, False, True
+
+        return tied[0], False, False

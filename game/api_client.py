@@ -24,3 +24,20 @@ class STS2Client:
             return None
         except (httpx.ConnectError, httpx.TimeoutException):
             return None
+
+    async def post_action(self, body: dict) -> dict | None:
+        """Submit a player action to STS2MCP. Returns parsed JSON or None on failure."""
+        try:
+            response = await self._http.post(
+                f"{self._base_url}/api/v1/singleplayer", json=body
+            )
+            if response.is_success:
+                return response.json()
+            logger.warning(
+                "STS2MCP action POST returned status %s: %s",
+                response.status_code,
+                response.text,
+            )
+            return None
+        except (httpx.ConnectError, httpx.TimeoutException):
+            return None
