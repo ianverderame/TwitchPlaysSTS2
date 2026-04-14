@@ -5,6 +5,7 @@ import sys
 from bot.client import TwitchBot
 from config.loader import load_config
 from game.api_client import STS2Client
+from game.polling import poll_game_state
 
 logging.basicConfig(
     level=logging.INFO,
@@ -12,15 +13,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
-
-
-async def terminal_recheck_loop(game_client: STS2Client) -> None:
-    """Read terminal input. Type 'recheck' to ping the STS2MCP API again."""
-    loop = asyncio.get_event_loop()
-    while True:
-        line = await loop.run_in_executor(None, sys.stdin.readline)
-        if line.strip().lower() == "recheck":
-            await game_client.ping()
 
 
 async def main() -> None:
@@ -31,17 +23,26 @@ async def main() -> None:
         sys.exit(1)
 
     game_client = STS2Client(config["api"]["sts2mcp_base_url"])
-    await game_client.ping()
 
-    # Quieten TwitchIO's verbose loggers
+    state = await game_client.get_state()
+    if state is not None:
+        logger.info("STS2MCP API reachable at %s", config["api"]["sts2mcp_base_url"])
+    else:
+        logger.warning("STS2MCP API not reachable at startup — polling will retry")
+
+    # Quieten verbose third-party loggers
     logging.getLogger("twitchio").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    interval = config["game"]["poll_interval_seconds"]
 
     async with TwitchBot(config) as bot:
-        recheck_task = asyncio.create_task(terminal_recheck_loop(game_client))
+        poll_task = asyncio.create_task(poll_game_state(game_client, interval))
         try:
             await bot.start()
         finally:
-            recheck_task.cancel()
+            poll_task.cancel()
+            await game_client.close()
 
 
 if __name__ == "__main__":
