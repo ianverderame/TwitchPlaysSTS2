@@ -14,12 +14,15 @@ def build_api_body(state: GameState, winner: str) -> dict:
     """
     st = state.state_type
 
-    if st == "monster":
+    if st in {"monster", "elite", "boss"}:
         if winner == "end":
             return {"action": "end_turn"}
         try:
             idx = int(winner) - 1
-            return {"action": "play_card", "card_index": idx}
+            body: dict = {"action": "play_card", "card_index": idx}
+            if state.enemies:
+                body["target"] = state.enemies[0]["entity_id"]
+            return body
         except ValueError:
             pass
 
@@ -41,6 +44,30 @@ def build_api_body(state: GameState, winner: str) -> dict:
         try:
             idx = int(winner) - 1
             return {"action": "choose_event_option", "index": idx}
+        except ValueError:
+            pass
+
+    elif st == "shop":
+        if winner == "end":
+            return {"action": "proceed"}
+
+    elif st == "rest_site":
+        try:
+            idx = int(winner) - 1
+            return {"action": "choose_rest_option", "index": idx}
+        except ValueError:
+            pass
+
+    elif st == "rewards":
+        if winner == "end":
+            return {"action": "proceed"}
+
+    elif st == "treasure":
+        if winner == "end":
+            return {"action": "proceed"}
+        try:
+            idx = int(winner) - 1
+            return {"action": "claim_treasure_relic", "index": idx}
         except ValueError:
             pass
 

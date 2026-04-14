@@ -10,6 +10,7 @@ from game.actions import build_api_body
 from game.api_client import STS2Client
 from game.events import GameEndedEvent, GameEvent, GameStartedEvent, VoteNeededEvent
 from game.options import options_for_state
+from game.state import GameState
 
 logger = logging.getLogger(__name__)
 
@@ -130,8 +131,19 @@ class TwitchBot(commands.Bot):
                         state_summary=event.state.summary(),
                     )
 
+                    # Re-fetch state so action uses fresh data (e.g. enemies list
+                    # may be empty on the first monster poll that queued the vote).
+                    fresh_data = await self._game_client.get_state()
+                    if fresh_data:
+                        try:
+                            action_state = GameState.from_api_response(fresh_data)
+                        except ValueError:
+                            action_state = event.state
+                    else:
+                        action_state = event.state
+
                     try:
-                        body = build_api_body(event.state, winner)
+                        body = build_api_body(action_state, winner)
                     except ValueError:
                         logger.error(
                             "No API mapping for state=%s winner=%s — skipping action",

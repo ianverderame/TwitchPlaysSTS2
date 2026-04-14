@@ -1,5 +1,5 @@
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +16,7 @@ class GameState:
     floor: int | None
     player_hp: int | None
     player_max_hp: int | None
+    enemies: list[dict] = field(default_factory=list)  # Combat only; empty outside combat
 
     @classmethod
     def from_api_response(cls, data: dict) -> "GameState":
@@ -30,6 +31,7 @@ class GameState:
 
         run = data.get("run") or {}
         player = data.get("player") or {}
+        battle = data.get("battle") or {}
 
         return cls(
             state_type=data["state_type"],
@@ -37,6 +39,7 @@ class GameState:
             floor=run.get("floor"),
             player_hp=player.get("hp"),
             player_max_hp=player.get("max_hp"),
+            enemies=battle.get("enemies") or [],
         )
 
     def requires_player_input(self) -> bool:

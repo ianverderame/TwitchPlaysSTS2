@@ -9,10 +9,16 @@ logger = logging.getLogger(__name__)
 # to add them here. In 1.0, values will be replaced with real API-derived options.
 KNOWN_STATES: dict[str, list[str]] = {
     "monster":     ["1", "2", "3", "4", "5", "end"],  # combat encounter
+    "elite":       ["1", "2", "3", "4", "5", "end"],  # elite combat
+    "boss":        ["1", "2", "3", "4", "5", "end"],  # boss combat
     "hand_select": ["1", "2", "3", "4", "5"],          # select a card from hand (card effect)
     "card_reward": ["1", "2", "3"],
     "map":         ["1", "2", "3", "4", "5"],  # node index — exact count unverified; trim via live testing
     "event":       ["1", "2", "3"],
+    "shop":        ["end"],                            # "end" → proceed (leave shop)
+    "rest_site":   ["1", "2", "3"],                    # rest site options
+    "rewards":     ["end"],                            # "end" → proceed (leave rewards screen)
+    "treasure":    ["1", "end"],                       # "1" → claim relic, "end" → proceed
 }
 
 
