@@ -6,13 +6,15 @@
 ## Recently Completed
 - PRD written and posted as GitHub issue #1
 - GitHub labels, milestones, and issue template created
+- Twitch bot account (verdybot) created and credentials configured
+- Twitch CLI installed, OAuth token generated with chat:read + chat:edit scopes
+- `scripts/verify_twitch.py` written and passing
 
 ## Active Issue
 None
 
 ## Up Next
-1. Set up Twitch bot account and credentials
-2. Implement PoC bot (issue to be created)
+1. Implement PoC bot (issue to be created)
 
 ## Key Decisions
 - Bot and game run on same PC (localhost API)

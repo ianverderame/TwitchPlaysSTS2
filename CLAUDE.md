@@ -42,6 +42,13 @@ TwitchPlaysSTS2/
 └── requirements.txt
 ```
 
+## Session Rules
+
+- **One issue at a time.** Each session works on exactly one active GitHub Issue. Do not start, plan, or implement work outside that issue's scope.
+- **No scope creep.** If related work is identified that falls outside the active issue, create a new GitHub Issue for it and stop there. Do not implement it in the current session.
+- **Check `PROGRESS.md` first.** At the start of every session, read `PROGRESS.md` to identify the active issue before doing anything else.
+- **No commits without explicit user request.** Never run `git commit` or `git push` unless the user explicitly asks.
+
 ## Coding Conventions
 
 - Python 3.11+
