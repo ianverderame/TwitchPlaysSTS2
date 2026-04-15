@@ -137,6 +137,17 @@ class TwitchBot(commands.Bot):
                                 )
                                 self._event_queue.task_done()
                                 continue
+                            # For combat states, also discard if it's now the enemy's turn
+                            if (
+                                pre_vote_state.is_combat_state()
+                                and pre_vote_state.is_play_phase is False
+                            ):
+                                logger.warning(
+                                    "Discarding stale vote: combat state '%s' but is_play_phase=False (enemy turn)",
+                                    event.state.state_type,
+                                )
+                                self._event_queue.task_done()
+                                continue
                         except ValueError:
                             pass  # Can't parse fresh state — proceed with the vote anyway
 
@@ -160,11 +171,21 @@ class TwitchBot(commands.Bot):
                         action_state = event.state
 
                     # Check 2: discard if the game moved on while the vote window
-                    # was open (e.g. state changed during the 10-second window).
+                    # was open (e.g. state changed during the vote duration).
                     if action_state.state_type != event.state.state_type:
                         logger.warning(
                             "Discarding stale vote result: queued for '%s' but game is now '%s'",
                             event.state.state_type,
+                            action_state.state_type,
+                        )
+                        self._event_queue.task_done()
+                        continue
+                    if (
+                        action_state.is_combat_state()
+                        and action_state.is_play_phase is False
+                    ):
+                        logger.warning(
+                            "Discarding stale vote result: combat state '%s' but is_play_phase=False (enemy turn)",
                             action_state.state_type,
                         )
                         self._event_queue.task_done()

@@ -18,15 +18,36 @@ def build_api_body(state: GameState, winner: str) -> dict:
         if winner == "end":
             return {"action": "end_turn"}
         try:
-            idx = int(winner) - 1
-            body: dict = {"action": "play_card", "card_index": idx}
+            # Vote number matches the 1-indexed hand position shown in-game
+            card_index = int(winner) - 1
+            body: dict = {"action": "play_card", "card_index": card_index}
             if state.enemies:
                 body["target"] = state.enemies[0]["entity_id"]
             return body
         except ValueError:
             pass
 
+    elif st == "hand_select":
+        if winner == "confirm":
+            return {"action": "combat_confirm_selection"}
+        try:
+            idx = int(winner) - 1
+            return {"action": "combat_select_card", "card_index": idx}
+        except ValueError:
+            pass
+
+    elif st == "rewards":
+        if winner == "end":
+            return {"action": "proceed"}
+        try:
+            idx = int(winner) - 1
+            return {"action": "claim_reward", "index": idx}
+        except ValueError:
+            pass
+
     elif st == "card_reward":
+        if winner == "skip":
+            return {"action": "skip_card_reward"}
         try:
             idx = int(winner) - 1
             return {"action": "select_card_reward", "card_index": idx}
@@ -47,10 +68,6 @@ def build_api_body(state: GameState, winner: str) -> dict:
         except ValueError:
             pass
 
-    elif st == "shop":
-        if winner == "end":
-            return {"action": "proceed"}
-
     elif st == "rest_site":
         try:
             idx = int(winner) - 1
@@ -58,9 +75,23 @@ def build_api_body(state: GameState, winner: str) -> dict:
         except ValueError:
             pass
 
-    elif st == "rewards":
+    elif st == "shop":
         if winner == "end":
             return {"action": "proceed"}
+        try:
+            idx = int(winner) - 1
+            return {"action": "shop_purchase", "index": idx}
+        except ValueError:
+            pass
+
+    elif st == "fake_merchant":
+        if winner == "end":
+            return {"action": "proceed"}
+        try:
+            idx = int(winner) - 1
+            return {"action": "shop_purchase", "index": idx}
+        except ValueError:
+            pass
 
     elif st == "treasure":
         if winner == "end":
@@ -71,12 +102,51 @@ def build_api_body(state: GameState, winner: str) -> dict:
         except ValueError:
             pass
 
-    elif st == "hand_select":
+    elif st == "card_select":
+        if winner == "confirm":
+            return {"action": "confirm_selection"}
+        if winner == "cancel":
+            return {"action": "cancel_selection"}
         try:
             idx = int(winner) - 1
-            return {"action": "combat_select_card", "card_index": idx}
+            return {"action": "select_card", "index": idx}
         except ValueError:
             pass
+
+    elif st == "bundle_select":
+        if winner == "cancel":
+            return {"action": "cancel_bundle_selection"}
+        try:
+            idx = int(winner) - 1
+            return {"action": "select_bundle", "index": idx}
+        except ValueError:
+            pass
+
+    elif st == "relic_select":
+        if winner == "skip":
+            return {"action": "skip_relic_selection"}
+        try:
+            idx = int(winner) - 1
+            return {"action": "select_relic", "index": idx}
+        except ValueError:
+            pass
+
+    elif st == "crystal_sphere":
+        try:
+            idx = int(winner) - 1
+            cells = state.crystal_sphere_cells
+            if not cells:
+                raise ValueError("crystal_sphere_cells is empty — cannot resolve coordinates")
+            if idx >= len(cells):
+                raise ValueError(
+                    f"Vote index {idx} out of range; only {len(cells)} clickable cells available"
+                )
+            cell = cells[idx]
+            return {"action": "crystal_sphere_click_cell", "x": cell["x"], "y": cell["y"]}
+        except (ValueError, KeyError) as exc:
+            raise ValueError(
+                f"crystal_sphere action failed for winner={winner!r}: {exc}"
+            ) from exc
 
     raise ValueError(
         f"No API mapping for state_type={st!r}, winner={winner!r}. "
