@@ -34,6 +34,21 @@ KNOWN_STATES: dict[str, list[str]] = {
 }
 
 
+_DEFAULT_MAX_POTION_SLOTS = 3  # STS2 default; may change with certain relics
+
+
+def _shop_item_available(item: dict, state: GameState) -> bool:
+    """Return True if a shop item can be meaningfully purchased right now."""
+    if not item.get("is_stocked", True):
+        return False
+    if not item.get("can_afford", True):
+        return False
+    # Potions can't be bought when the belt is full
+    if item.get("category") == "potion" and state.player_potion_count >= _DEFAULT_MAX_POTION_SLOTS:
+        return False
+    return True
+
+
 def options_for_state(state: GameState) -> list[str]:
     """Return the list of valid vote choices for the given game state.
 
@@ -52,6 +67,23 @@ def options_for_state(state: GameState) -> list[str]:
     if state.state_type == "hand_select" and state.hand_select_card_count:
         # Derive options from actual selectable cards; confirm is auto-sent after selection
         return [str(i + 1) for i in range(state.hand_select_card_count)]
+
+    if state.state_type == "rest_site" and state.rest_site_options:
+        # Only offer enabled options (e.g. Smith may be unavailable early)
+        enabled = [o for o in state.rest_site_options if o.get("is_enabled", True)]
+        if enabled:
+            return [str(o["index"] + 1) for o in enabled]
+
+    if state.state_type == "map" and state.map_next_options:
+        # Sort by col ascending (left → right) so !1 is always the leftmost path
+        sorted_nodes = sorted(state.map_next_options, key=lambda n: n["col"])
+        return [str(i + 1) for i in range(len(sorted_nodes))]
+
+    if state.state_type in ("shop", "fake_merchant") and state.shop_items:
+        # Only offer items that are stocked, affordable, and purchasable given current state
+        available = [i for i in state.shop_items if _shop_item_available(i, state)]
+        if available:
+            return [str(i["index"] + 1) for i in available] + ["end"]
 
     if state.state_type == "event" and state.event_options:
         # Derive options from actual event options, skipping locked ones
