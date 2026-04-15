@@ -21,6 +21,10 @@ class GameState:
     playable_card_indices: list[int] = field(default_factory=list)  # hand indices of can_play=True cards
     enemies: list[dict] = field(default_factory=list)  # Combat only; empty outside combat
     crystal_sphere_cells: list[dict] = field(default_factory=list)  # crystal_sphere.clickable_cells
+    event_options: list[dict] = field(default_factory=list)         # event.options (event state only)
+    hand_select_card_count: int = 0                                  # len(hand_select.cards) (hand_select state only)
+    rewards_items: list[dict] = field(default_factory=list)          # rewards.items (rewards state only)
+    card_select_can_confirm: bool = False                             # card_select.can_confirm (card_select state only)
 
     @classmethod
     def from_api_response(cls, data: dict) -> "GameState":
@@ -37,6 +41,10 @@ class GameState:
         player = data.get("player") or {}
         battle = data.get("battle") or {}
         crystal_sphere = data.get("crystal_sphere") or {}
+        event = data.get("event") or {}
+        hand_select = data.get("hand_select") or {}
+        rewards = data.get("rewards") or {}
+        card_select = data.get("card_select") or {}
 
         return cls(
             state_type=data["state_type"],
@@ -53,6 +61,10 @@ class GameState:
             ],
             enemies=battle.get("enemies") or [],
             crystal_sphere_cells=crystal_sphere.get("clickable_cells") or [],
+            event_options=event.get("options") or [],
+            hand_select_card_count=len(hand_select.get("cards") or []),
+            rewards_items=rewards.get("items") or [],
+            card_select_can_confirm=bool(card_select.get("can_confirm")),
         )
 
     def is_combat_state(self) -> bool:

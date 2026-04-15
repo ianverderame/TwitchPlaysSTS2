@@ -112,6 +112,16 @@ async def poll_game_state(
                                 state.hand_size,
                             )
                             event_queue.put_nowait(VoteNeededEvent(state))
+                    elif state.state_type == "event":
+                        curr_key = [(o.get("index"), o.get("title")) for o in state.event_options]
+                        prev_key = [(o.get("index"), o.get("title")) for o in previous_state.event_options]
+                        if prev_key and curr_key != prev_key and state.requires_player_input():
+                            logger.info(
+                                "Event options changed %s → %s — re-queuing vote",
+                                [t for _, t in prev_key],
+                                [t for _, t in curr_key],
+                            )
+                            event_queue.put_nowait(VoteNeededEvent(state))
                     previous_state = state
 
         except Exception:
