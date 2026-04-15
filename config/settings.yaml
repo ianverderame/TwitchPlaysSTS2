@@ -5,7 +5,8 @@ twitch:
   channel: ""           # Your Twitch channel name
 
 vote:
-  duration_seconds: 2  # How long each voting window stays open
+  duration_seconds: 10  # How long each card/action voting window stays open
+  target_duration_seconds: 10  # How long the target selection vote stays open
 
 game:
   poll_interval_seconds: 1  # How often to check STS2 game state

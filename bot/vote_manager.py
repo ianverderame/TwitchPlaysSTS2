@@ -46,6 +46,7 @@ class VoteManager:
         state_summary: str,
         labels: dict[str, str] | None = None,
         preamble: str = "Vote open!",
+        duration: float | None = None,
     ) -> str:
         """Open a vote window, collect votes, tally, announce winner.
 
@@ -57,18 +58,20 @@ class VoteManager:
         self._open = True
         logger.info("Vote window opened for state: %s", state_summary)
 
+        effective_duration = duration if duration is not None else self._duration
+
         parts = [
             f"!{o}={labels[o]}" if (labels and o in labels) else f"!{o}"
             for o in options
         ]
         options_str = "  ".join(parts)
         await broadcaster.send_message(
-            message=f"{preamble} {options_str}  ({self._duration:.0f}s)",
+            message=f"{preamble} {options_str}  ({effective_duration:.0f}s)",
             sender=bot_id,
             token_for=bot_id,
         )
 
-        await asyncio.sleep(self._duration)
+        await asyncio.sleep(effective_duration)
 
         self._open = False
         logger.info("Vote window closed. %d vote(s) cast.", len(self._votes))

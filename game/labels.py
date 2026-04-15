@@ -113,6 +113,18 @@ def labels_for_state(state: GameState) -> dict[str, str]:
     return {}
 
 
+def target_labels_for_enemies(enemies: list[dict]) -> dict[str, str]:
+    """Return {option_str: display_label} for a target-selection vote.
+
+    Labels use the format "Name (hp/max_hphp)", ordered by the enemies list
+    (left-to-right screen order as returned by the API).
+    """
+    return {
+        str(i + 1): f"{e['name']} ({e['hp']}/{e['max_hp']}hp)"
+        for i, e in enumerate(enemies)
+    }
+
+
 def preamble_for_state(state: GameState) -> str:
     """Return the opening phrase for a vote announcement.
 
@@ -121,4 +133,6 @@ def preamble_for_state(state: GameState) -> str:
     """
     if state.state_type == "map":
         return "Map (left -> right):"
+    if state.state_type == "hand_select" and state.hand_select_prompt:
+        return f"{state.hand_select_prompt.rstrip('.')}:"
     return "Vote open!"

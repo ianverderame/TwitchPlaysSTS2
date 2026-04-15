@@ -5,7 +5,7 @@ from game.state import GameState
 logger = logging.getLogger(__name__)
 
 
-def build_api_body(state: GameState, winner: str) -> dict:
+def build_api_body(state: GameState, winner: str, target_entity_id: str | None = None) -> dict:
     """Translate a vote winner string into a STS2MCP action request body.
 
     Vote options are 1-indexed strings (e.g. "1", "2"); the API uses 0-indexed
@@ -21,7 +21,9 @@ def build_api_body(state: GameState, winner: str) -> dict:
             # Vote number matches the 1-indexed hand position shown in-game
             card_index = int(winner) - 1
             body: dict = {"action": "play_card", "card_index": card_index}
-            if state.enemies:
+            if target_entity_id is not None:
+                body["target"] = target_entity_id
+            elif state.enemies:
                 body["target"] = state.enemies[0]["entity_id"]
             return body
         except ValueError:
