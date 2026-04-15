@@ -128,6 +128,9 @@ class TwitchBot(commands.Bot):
                 elif isinstance(event, MenuSelectNeededEvent):
                     await self._handle_menu_select(broadcaster)
 
+                elif isinstance(event, VoteNeededEvent) and event.state.state_type == "rewards":
+                    await self._handle_rewards()
+
                 elif isinstance(event, VoteNeededEvent):
                     # Check 1: discard if the game has already moved on since this
                     # event was queued (common during rapid floor-0 transitions).
@@ -152,6 +155,18 @@ class TwitchBot(commands.Bot):
                                     "Discarding stale vote: combat state '%s' but is_play_phase=False (enemy turn)",
                                     event.state.state_type,
                                 )
+                                self._event_queue.task_done()
+                                continue
+                            # Auto-proceed: single is_proceed option — no vote needed
+                            if (
+                                pre_vote_state.state_type == "event"
+                                and len(pre_vote_state.event_options) == 1
+                                and pre_vote_state.event_options[0].get("is_proceed")
+                            ):
+                                proceed_index = pre_vote_state.event_options[0]["index"]
+                                body = {"action": "choose_event_option", "index": proceed_index}
+                                result = await self._game_client.post_action(body)
+                                logger.info("Auto-proceeding event (single proceed option) → %s", result)
                                 self._event_queue.task_done()
                                 continue
                         except ValueError:
@@ -222,6 +237,27 @@ class TwitchBot(commands.Bot):
                     else:
                         logger.info("Action executed: %s → %s", winner, result)
 
+                    # hand_select: auto-confirm after card selection — no second vote needed
+                    if action_state.state_type == "hand_select" and body.get("action") == "combat_select_card":
+                        confirm_result = await self._game_client.post_action({"action": "combat_confirm_selection"})
+                        logger.info("Auto-confirmed hand_select → %s", confirm_result)
+
+                    # card_select: re-queue if more selections needed, auto-confirm when ready
+                    elif action_state.state_type == "card_select" and body.get("action") == "select_card":
+                        fresh_data = await self._game_client.get_state()
+                        if fresh_data:
+                            try:
+                                post_select_state = GameState.from_api_response(fresh_data)
+                                if post_select_state.state_type == "card_select":
+                                    if post_select_state.card_select_can_confirm:
+                                        confirm_result = await self._game_client.post_action({"action": "confirm_selection"})
+                                        logger.info("Auto-confirmed card_select → %s", confirm_result)
+                                    else:
+                                        logger.info("card_select: more selections needed — re-queuing vote")
+                                        self._event_queue.put_nowait(VoteNeededEvent(post_select_state))
+                            except ValueError:
+                                pass
+
                 self._event_queue.task_done()
 
             except asyncio.CancelledError:
@@ -229,6 +265,66 @@ class TwitchBot(commands.Bot):
                 raise
             except Exception:
                 logger.error("Unexpected error in event runner", exc_info=True)
+
+    async def _handle_rewards(self) -> None:
+        """Auto-claim all non-card rewards, open card rewards for a chat vote, then proceed.
+
+        Claims one item per loop iteration and re-fetches state each time since
+        claiming shifts reward indices. Card/special_card/card_removal rewards are
+        opened last and return early — the resulting selection state is handled by
+        the polling loop as a separate VoteNeededEvent.
+        """
+        # Types that open a selection screen for chat to vote on
+        VOTE_TYPES = {"card", "special_card", "card_removal"}
+
+        while True:
+            fresh_data = await self._game_client.get_state()
+            if not fresh_data:
+                logger.warning("Rewards: could not fetch fresh state — skipping")
+                return
+
+            try:
+                state = GameState.from_api_response(fresh_data)
+            except ValueError:
+                logger.warning("Rewards: malformed state response — skipping")
+                return
+
+            if state.state_type != "rewards":
+                logger.info("Rewards: state moved to '%s' — done", state.state_type)
+                return
+
+            # Prefer non-vote items first; keep a card/selection item as fallback
+            auto_item = None
+            vote_item = None
+            for item in state.rewards_items:
+                item_type = item.get("type")
+                if item_type in VOTE_TYPES:
+                    if vote_item is None:
+                        vote_item = item
+                else:
+                    auto_item = item
+                    break  # claim one at a time, re-fetch after
+
+            if auto_item:
+                result = await self._game_client.post_action(
+                    {"action": "claim_reward", "index": auto_item["index"]}
+                )
+                logger.info("Auto-claimed %s reward → %s", auto_item.get("type"), result)
+                continue  # re-fetch and process remaining items
+
+            if vote_item:
+                result = await self._game_client.post_action(
+                    {"action": "claim_reward", "index": vote_item["index"]}
+                )
+                logger.info(
+                    "Auto-opened %s reward for vote → %s", vote_item.get("type"), result
+                )
+                return  # polling loop handles the resulting selection state
+
+            # Nothing left to claim — proceed to map
+            result = await self._game_client.post_action({"action": "proceed"})
+            logger.info("Auto-proceeded from rewards → %s", result)
+            return
 
     async def _handle_menu_select(self, broadcaster: twitchio.PartialUser) -> None:
         """Handle a MenuSelectNeededEvent: navigate to character select, run vote, embark."""

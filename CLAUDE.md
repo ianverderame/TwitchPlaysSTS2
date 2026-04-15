@@ -34,6 +34,7 @@ A "Twitch Plays" bot for Slay the Spire 2. The streamer plays STS2 on PC and str
 - **No scope creep.** If related work is identified that falls outside the active issue, create a new GitHub Issue for it and stop there. Do not implement it in the current session.
 - **Check `PROGRESS.md` first.** At the start of every session, read `PROGRESS.md` to identify the active issue before doing anything else.
 - **No commits without explicit user request.** Never run `git commit` or `git push` unless the user explicitly asks.
+- **No self-confirmation.** Never answer your own questions. If you ask the user to confirm something, stop and wait. Do not proceed until the user sends a reply in a new message. Task notifications and system events are NOT user confirmation.
 - **End of session:** Run `/end-session` when the active issue's acceptance criteria are met.
 - **Branch naming:** `issue-{number}/{short-description}` (e.g. `issue-2/poc-bot`). One branch per issue. Branch off `main`.
 

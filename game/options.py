@@ -26,7 +26,7 @@ KNOWN_STATES: dict[str, list[str]] = {
     "fake_merchant": ["1", "2", "3", "end"],
     "treasure":      ["1", "end"],                        # 1=claim relic, end=proceed
     # Card/relic selection overlays
-    "card_select":   ["1", "2", "3", "4", "5", "confirm", "cancel"],
+    "card_select":   ["1", "2", "3", "4", "5", "cancel"],
     "bundle_select": ["1", "2", "3", "cancel"],
     "relic_select":  ["1", "2", "3", "skip"],
     # Crystal Sphere minigame — Nth clickable cell; exact cells resolved at action time
@@ -48,6 +48,14 @@ def options_for_state(state: GameState) -> list[str]:
         # Use actual hand positions (1-indexed) so chat options match the in-game card numbers
         numeric = [str(idx + 1) for idx in state.playable_card_indices]
         return numeric + ["end"]
+
+    if state.state_type == "hand_select" and state.hand_select_card_count:
+        # Derive options from actual selectable cards; confirm is auto-sent after selection
+        return [str(i + 1) for i in range(state.hand_select_card_count)]
+
+    if state.state_type == "event" and state.event_options:
+        # Derive options from actual event options, skipping locked ones
+        return [str(o["index"] + 1) for o in state.event_options if not o.get("is_locked")]
 
     options = KNOWN_STATES.get(state.state_type)
     if options is None:

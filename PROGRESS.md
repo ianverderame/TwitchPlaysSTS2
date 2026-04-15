@@ -4,17 +4,16 @@
 `PoC`
 
 ## Recently Completed
-- #11 — State map catalog + within-state detection: full state_type map, `is_play_phase` vote trigger, dynamic playable-card options, within-turn re-queue, stale checks for combat; live-tested full run
-- #21 — Stale vote queue: pre-window + post-window state checks in `_event_runner`; stale votes discarded with WARNING log; live-tested through event→map→monster transition
-- #19 — Combat: target entity_id for play_card: enemies captured in GameState, auto-target first enemy, fresh state re-fetched at action time, live-tested (Strike targeting Nibbit)
+- #21 — Stale vote queue: pre/post-window state checks in `_event_runner`; live-tested
+- #26 — Mid-event option change detection: `event_options` in `GameState`, within-state re-queue, auto-proceed for single proceed option, dynamic event/hand_select/card_select options, auto-confirm for hand_select+card_select, rewards auto-handling (gold/potion auto-claim, card opens for vote, auto-proceed); live-tested full flow
 
 ## Active Issue
-None — #11 complete
+None
 
 ## Up Next
-1. #6 — STS2-MenuControl Integration (pre-run menu/character selection only; all in-run states handled by STS2MCP)
-2. #7 — Database Logging
-3. #9 — Production Hardening
+1. #7 — Database Logging
+2. #9 — Production Hardening
+3. #28 — Descriptive vote option labels in chat announcements
 
 ## Key Decisions
 - Bot and game run on same PC (localhost API)
