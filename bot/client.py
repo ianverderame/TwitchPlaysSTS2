@@ -8,7 +8,8 @@ from twitchio.ext import commands
 from bot.vote_manager import VoteManager
 from game.actions import build_api_body
 from game.api_client import STS2Client
-from game.events import GameEndedEvent, GameEvent, GameStartedEvent, VoteNeededEvent
+from game.events import GameEndedEvent, GameEvent, GameStartedEvent, MenuSelectNeededEvent, VoteNeededEvent
+from game.menu_client import MenuClient
 from game.options import options_for_state
 from game.state import GameState
 
@@ -44,6 +45,7 @@ class TwitchBot(commands.Bot):
         config: dict,
         event_queue: asyncio.Queue[GameEvent],
         game_client: STS2Client,
+        menu_client: MenuClient,
     ) -> None:
         self._channel = config["twitch"]["channel"]
         self._owner_id = config["twitch"]["owner_id"]
@@ -54,6 +56,7 @@ class TwitchBot(commands.Bot):
 
         self._event_queue = event_queue
         self._game_client = game_client
+        self._menu_client = menu_client
         self.vote_manager = VoteManager(config["vote"]["duration_seconds"])
 
         super().__init__(
@@ -121,6 +124,9 @@ class TwitchBot(commands.Bot):
                         sender=self.bot_id,
                         token_for=self.bot_id,
                     )
+
+                elif isinstance(event, MenuSelectNeededEvent):
+                    await self._handle_menu_select(broadcaster)
 
                 elif isinstance(event, VoteNeededEvent):
                     # Check 1: discard if the game has already moved on since this
@@ -223,3 +229,108 @@ class TwitchBot(commands.Bot):
                 raise
             except Exception:
                 logger.error("Unexpected error in event runner", exc_info=True)
+
+    async def _handle_menu_select(self, broadcaster: twitchio.PartialUser) -> None:
+        """Handle a MenuSelectNeededEvent: navigate to character select, run vote, embark."""
+        # Retry initial query — MenuControl may still be initializing when STS2MCP first reports menu
+        menu_data = None
+        for _ in range(5):
+            menu_data = await self._menu_client.get_menu_state()
+            if menu_data and menu_data.get("screen") not in (None, "UNKNOWN", "IN_GAME"):
+                break
+            await asyncio.sleep(1.0)
+        if not menu_data:
+            logger.warning("MenuControl API unreachable — skipping character select vote")
+            return
+
+        screen = menu_data.get("screen", "UNKNOWN")
+        available_actions = menu_data.get("available_actions", [])
+
+        if screen == "MAIN_MENU":
+            if "open_character_select" not in available_actions:
+                logger.warning(
+                    "MenuControl: open_character_select unavailable; screen=%s available_actions=%s",
+                    screen,
+                    available_actions,
+                )
+                return
+            result = await self._menu_client.post_menu_action("open_character_select")
+            if result is None:
+                logger.warning("MenuControl: open_character_select POST failed")
+                return
+
+            # Re-query with retries — open_character_select may need a moment to transition
+            for _ in range(3):
+                await asyncio.sleep(0.5)
+                menu_data = await self._menu_client.get_menu_state()
+                if menu_data and menu_data.get("screen") == "CHARACTER_SELECT":
+                    screen = "CHARACTER_SELECT"
+                    break
+            else:
+                logger.warning(
+                    "MenuControl: expected CHARACTER_SELECT after open_character_select, "
+                    "got screen=%s available_actions=%s — skipping",
+                    menu_data.get("screen") if menu_data else None,
+                    menu_data.get("available_actions") if menu_data else None,
+                )
+                return
+
+        if screen != "CHARACTER_SELECT":
+            logger.warning(
+                "MenuControl: unexpected screen=%s — skipping character select vote",
+                screen,
+            )
+            return
+
+        characters = menu_data.get("characters", [])
+        enabled = [c for c in characters if c.get("enabled", False)]
+        if not enabled:
+            logger.warning("MenuControl: no enabled characters found — skipping vote")
+            return
+
+        options = [str(i + 1) for i in range(len(enabled))]
+        ascension: int | None = menu_data.get("ascension")
+
+        def _fmt(char_id: str) -> str:
+            return char_id.replace("_", " ").title()
+
+        char_list = "  ".join(
+            f"!{opt}={_fmt(enabled[int(opt) - 1]['character_id'])}" for opt in options
+        )
+        asc_str = f" | Ascension {ascension}" if ascension else ""
+        await broadcaster.send_message(
+            message=f"Choose your character{asc_str}: {char_list}",
+            sender=self.bot_id,
+            token_for=self.bot_id,
+        )
+
+        winner = await self.vote_manager.run_window(
+            broadcaster=broadcaster,
+            bot_id=self.bot_id,
+            options=options,
+            state_summary=f"character select{asc_str}",
+        )
+
+        winning_pos = int(winner) - 1
+        winning_char_data = enabled[winning_pos]
+        winning_char = _fmt(winning_char_data["character_id"])
+        winning_index = winning_char_data["index"]  # absolute index in full button array
+
+        result = await self._menu_client.post_menu_action(
+            "select_character", option_index=winning_index
+        )
+        if result is None:
+            logger.warning("MenuControl: select_character POST failed")
+            return
+        result = await self._menu_client.post_menu_action("embark")
+        if result is None:
+            logger.warning("MenuControl: embark POST failed")
+            return
+
+        asc_display = f" (Ascension {ascension})" if ascension else ""
+        logger.info("Embarking as %s%s", winning_char, asc_display)
+        await broadcaster.send_message(
+            message=f"Starting run as {winning_char}{asc_display}!",
+            sender=self.bot_id,
+            token_for=self.bot_id,
+        )

@@ -2,7 +2,7 @@ import asyncio
 import logging
 
 from game.api_client import STS2Client
-from game.events import GameEndedEvent, GameStartedEvent, GameEvent, VoteNeededEvent
+from game.events import GameEndedEvent, GameStartedEvent, GameEvent, MenuSelectNeededEvent, VoteNeededEvent
 from game.state import GameState
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,10 @@ async def poll_game_state(
                 if previous_state is None:
                     # First successful poll — emit if input needed
                     logger.info("Initial game state: %s", state.summary())
-                    if state.requires_player_input():
+                    if state.state_type == "menu":
+                        logger.info("Game is at main menu — queuing character select vote")
+                        event_queue.put_nowait(MenuSelectNeededEvent())
+                    elif state.requires_player_input():
                         logger.info("Queuing vote for initial state: %s", state.state_type)
                         event_queue.put_nowait(VoteNeededEvent(state))
                     previous_state = state
@@ -79,6 +82,9 @@ async def poll_game_state(
                         event_queue.put_nowait(GameStartedEvent(state))
                     elif state.state_type == "game_over":
                         event_queue.put_nowait(GameEndedEvent(state))
+                    elif state.state_type == "menu":
+                        logger.info("Game is at main menu — queuing character select vote")
+                        event_queue.put_nowait(MenuSelectNeededEvent())
                     elif state.requires_player_input():
                         logger.info("Queuing vote for state: %s", state.state_type)
                         event_queue.put_nowait(VoteNeededEvent(state))
