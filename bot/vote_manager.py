@@ -94,11 +94,18 @@ class VoteManager:
     def _tally(self, options: list[str]) -> tuple[str, bool, bool]:
         """Return (winner, was_random, was_tie).
 
-        was_random: True when no votes were cast (winner chosen from full options list).
-        was_tie: True when multiple options share the top vote count (winner chosen randomly among them).
+        was_random: True when no votes were cast (winner chosen from random pool).
+        was_tie: True when multiple options share the top vote count (winner chosen randomly among tied).
+
+        Random fallback and tie-breaking only pick from numeric options (e.g. "1", "2") so
+        terminal actions like "end", "skip", "cancel" are never chosen without an explicit vote.
+        Falls back to the full options list only if there are no numeric options at all.
         """
+        numeric_options = [o for o in options if o.isdigit()]
+        random_pool = numeric_options if numeric_options else options
+
         if not self._votes:
-            winner = random.choice(options)
+            winner = random.choice(random_pool)
             logger.info("No votes cast — random fallback: %s", winner)
             return winner, True, False
 
@@ -107,7 +114,9 @@ class VoteManager:
         tied = [choice for choice, count in counts.items() if count == max_count]
 
         if len(tied) > 1:
-            winner = random.choice(tied)
+            # Break ties using only numeric options that were among the tied choices
+            numeric_tied = [c for c in tied if c.isdigit()]
+            winner = random.choice(numeric_tied if numeric_tied else tied)
             logger.info("Tie between %s — random winner: %s", tied, winner)
             return winner, False, True
 
