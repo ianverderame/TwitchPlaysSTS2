@@ -44,6 +44,8 @@ class VoteManager:
         bot_id: str,
         options: list[str],
         state_summary: str,
+        labels: dict[str, str] | None = None,
+        preamble: str = "Vote open!",
     ) -> str:
         """Open a vote window, collect votes, tally, announce winner.
 
@@ -55,9 +57,13 @@ class VoteManager:
         self._open = True
         logger.info("Vote window opened for state: %s", state_summary)
 
-        options_str = " | ".join(f"!{o}" for o in options)
+        parts = [
+            f"!{o}={labels[o]}" if (labels and o in labels) else f"!{o}"
+            for o in options
+        ]
+        options_str = "  ".join(parts)
         await broadcaster.send_message(
-            message=f"Vote open! Type: {options_str}  ({self._duration:.0f}s)",
+            message=f"{preamble} {options_str}  ({self._duration:.0f}s)",
             sender=bot_id,
             token_for=bot_id,
         )
@@ -69,22 +75,25 @@ class VoteManager:
 
         winner, was_random, was_tie = self._tally(options)
 
+        winner_label = labels.get(winner) if labels else None
+        winner_str = f"!{winner}={winner_label}" if winner_label else f"!{winner}"
+
         if was_random:
             await broadcaster.send_message(
-                message=f"Vote closed — no votes, random pick: !{winner}",
+                message=f"Vote closed — no votes, random pick: {winner_str}",
                 sender=bot_id,
                 token_for=bot_id,
             )
         elif was_tie:
             await broadcaster.send_message(
-                message=f"Vote closed! Tie broken randomly: !{winner}",
+                message=f"Vote closed! Tie broken randomly: {winner_str}",
                 sender=bot_id,
                 token_for=bot_id,
             )
         else:
             count = sum(1 for v in self._votes.values() if v == winner)
             await broadcaster.send_message(
-                message=f"Vote closed! Winner: !{winner} ({count} vote(s)).",
+                message=f"Vote closed! Winner: {winner_str} ({count} vote(s)).",
                 sender=bot_id,
                 token_for=bot_id,
             )

@@ -10,6 +10,7 @@ from game.actions import build_api_body
 from game.api_client import STS2Client
 from game.events import GameEndedEvent, GameEvent, GameStartedEvent, MenuSelectNeededEvent, VoteNeededEvent
 from game.menu_client import MenuClient
+from game.labels import labels_for_state, preamble_for_state
 from game.options import options_for_state
 from game.state import GameState
 
@@ -169,6 +170,20 @@ class TwitchBot(commands.Bot):
                                 logger.info("Auto-proceeding event (single proceed option) → %s", result)
                                 self._event_queue.task_done()
                                 continue
+                            # Auto-proceed: rest_site after choosing an option (e.g. after Resting)
+                            if (
+                                pre_vote_state.state_type == "rest_site"
+                                and pre_vote_state.rest_site_can_proceed
+                                and not any(
+                                    o.get("is_enabled", True)
+                                    for o in pre_vote_state.rest_site_options
+                                    if not o.get("is_proceed")
+                                )
+                            ):
+                                result = await self._game_client.post_action({"action": "proceed"})
+                                logger.info("Auto-proceeding rest_site → %s", result)
+                                self._event_queue.task_done()
+                                continue
                         except ValueError:
                             pass  # Can't parse fresh state — proceed with the vote anyway
 
@@ -178,6 +193,8 @@ class TwitchBot(commands.Bot):
                         bot_id=self.bot_id,
                         options=options,
                         state_summary=event.state.summary(),
+                        labels=labels_for_state(event.state) or None,
+                        preamble=preamble_for_state(event.state),
                     )
 
                     # Re-fetch state so action uses fresh data (e.g. enemies list

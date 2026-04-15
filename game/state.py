@@ -15,6 +15,7 @@ class GameState:
     player_hp: int | None
     player_max_hp: int | None
     player_block: int | None = None       # player.block
+    player_potion_count: int = 0               # len(player.potions) — for shop potion availability
     player_energy: int | None = None      # player.energy (combat only)
     is_play_phase: bool | None = None          # battle.is_play_phase (combat only)
     hand_size: int | None = None               # len(player.hand) — used for mid-turn re-queue detection
@@ -25,6 +26,17 @@ class GameState:
     hand_select_card_count: int = 0                                  # len(hand_select.cards) (hand_select state only)
     rewards_items: list[dict] = field(default_factory=list)          # rewards.items (rewards state only)
     card_select_can_confirm: bool = False                             # card_select.can_confirm (card_select state only)
+    # Label data — human-readable names for vote option display
+    hand_card_names: dict[int, str] = field(default_factory=dict)    # hand index → card name (combat)
+    card_reward_names: list[str] = field(default_factory=list)       # card_reward.cards[i].name
+    rest_site_can_proceed: bool = False                               # rest_site.can_proceed
+    rest_site_options: list[dict] = field(default_factory=list)      # rest_site.options (has index, name, is_enabled)
+    map_next_options: list[dict] = field(default_factory=list)       # map.next_options (has index, col, type)
+    relic_select_relics: list[dict] = field(default_factory=list)    # relic_select.relics (has index, name)
+    treasure_relics: list[dict] = field(default_factory=list)        # treasure.relics (has index, name)
+    hand_select_cards: list[dict] = field(default_factory=list)      # hand_select.cards (has name)
+    card_select_cards: list[dict] = field(default_factory=list)      # card_select.cards (has name)
+    shop_items: list[dict] = field(default_factory=list)             # shop.items or fake_merchant.shop.items
 
     @classmethod
     def from_api_response(cls, data: dict) -> "GameState":
@@ -45,6 +57,11 @@ class GameState:
         hand_select = data.get("hand_select") or {}
         rewards = data.get("rewards") or {}
         card_select = data.get("card_select") or {}
+        card_reward_data = data.get("card_reward") or {}
+        rest_site_data = data.get("rest_site") or {}
+        map_data = data.get("map") or {}
+        relic_select_data = data.get("relic_select") or {}
+        treasure_data = data.get("treasure") or {}
 
         return cls(
             state_type=data["state_type"],
@@ -53,6 +70,7 @@ class GameState:
             player_hp=player.get("hp"),
             player_max_hp=player.get("max_hp"),
             player_block=player.get("block"),
+            player_potion_count=len(player.get("potions") or []),
             player_energy=player.get("energy"),
             is_play_phase=battle.get("is_play_phase"),
             hand_size=len(player.get("hand") or []),
@@ -65,6 +83,20 @@ class GameState:
             hand_select_card_count=len(hand_select.get("cards") or []),
             rewards_items=rewards.get("items") or [],
             card_select_can_confirm=bool(card_select.get("can_confirm")),
+            hand_card_names={c["index"]: c["name"] for c in (player.get("hand") or []) if "name" in c},
+            card_reward_names=[c["name"] for c in (card_reward_data.get("cards") or []) if "name" in c],
+            rest_site_can_proceed=bool(rest_site_data.get("can_proceed")),
+            rest_site_options=rest_site_data.get("options") or [],
+            map_next_options=map_data.get("next_options") or [],
+            relic_select_relics=relic_select_data.get("relics") or [],
+            treasure_relics=treasure_data.get("relics") or [],
+            hand_select_cards=hand_select.get("cards") or [],
+            card_select_cards=card_select.get("cards") or [],
+            shop_items=(
+                (data.get("shop") or {}).get("items")
+                or (data.get("fake_merchant") or {}).get("shop", {}).get("items")
+                or []
+            ),
         )
 
     def is_combat_state(self) -> bool:
