@@ -6,6 +6,7 @@ from bot.client import TwitchBot
 from config.loader import load_config
 from game.api_client import STS2Client
 from game.events import GameEvent
+from game.menu_client import MenuClient
 from game.polling import poll_game_state
 
 logging.basicConfig(
@@ -24,12 +25,19 @@ async def main() -> None:
         sys.exit(1)
 
     game_client = STS2Client(config["api"]["sts2mcp_base_url"])
+    menu_client = MenuClient(config["api"]["sts2_menu_base_url"])
 
     state = await game_client.get_state()
     if state is not None:
         logger.info("STS2MCP API reachable at %s", config["api"]["sts2mcp_base_url"])
     else:
         logger.warning("STS2MCP API not reachable at startup — polling will retry")
+
+    menu_state = await menu_client.get_menu_state()
+    if menu_state is not None:
+        logger.info("MenuControl API reachable at %s", config["api"]["sts2_menu_base_url"])
+    else:
+        logger.warning("MenuControl API not reachable at startup — character select will retry when needed")
 
     # Quieten verbose third-party loggers
     logging.getLogger("twitchio").setLevel(logging.WARNING)
@@ -38,7 +46,7 @@ async def main() -> None:
     interval = config["game"]["poll_interval_seconds"]
     event_queue: asyncio.Queue[GameEvent] = asyncio.Queue()
 
-    async with TwitchBot(config, event_queue, game_client) as bot:
+    async with TwitchBot(config, event_queue, game_client, menu_client) as bot:
         poll_task = asyncio.create_task(
             poll_game_state(game_client, interval, event_queue)
         )
@@ -47,6 +55,7 @@ async def main() -> None:
         finally:
             poll_task.cancel()
             await game_client.close()
+            await menu_client.close()
 
 
 if __name__ == "__main__":

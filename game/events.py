@@ -21,4 +21,9 @@ class GameEndedEvent:
     state: GameState
 
 
-GameEvent = VoteNeededEvent | GameStartedEvent | GameEndedEvent
+@dataclass
+class MenuSelectNeededEvent:
+    """Emitted when STS2MCP reports state_type=menu, triggering a character-select vote."""
+
+
+GameEvent = VoteNeededEvent | GameStartedEvent | GameEndedEvent | MenuSelectNeededEvent
