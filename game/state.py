@@ -24,10 +24,12 @@ class GameState:
     crystal_sphere_cells: list[dict] = field(default_factory=list)  # crystal_sphere.clickable_cells
     event_options: list[dict] = field(default_factory=list)         # event.options (event state only)
     hand_select_card_count: int = 0                                  # len(hand_select.cards) (hand_select state only)
+    hand_select_prompt: str = ""                                     # hand_select.prompt (hand_select state only)
     rewards_items: list[dict] = field(default_factory=list)          # rewards.items (rewards state only)
     card_select_can_confirm: bool = False                             # card_select.can_confirm (card_select state only)
     # Label data — human-readable names for vote option display
-    hand_card_names: dict[int, str] = field(default_factory=dict)    # hand index → card name (combat)
+    hand_card_names: dict[int, str] = field(default_factory=dict)        # hand index → card name (combat)
+    hand_card_target_types: dict[int, str] = field(default_factory=dict) # hand index → target_type (combat)
     card_reward_names: list[str] = field(default_factory=list)       # card_reward.cards[i].name
     rest_site_can_proceed: bool = False                               # rest_site.can_proceed
     rest_site_options: list[dict] = field(default_factory=list)      # rest_site.options (has index, name, is_enabled)
@@ -81,9 +83,11 @@ class GameState:
             crystal_sphere_cells=crystal_sphere.get("clickable_cells") or [],
             event_options=event.get("options") or [],
             hand_select_card_count=len(hand_select.get("cards") or []),
+            hand_select_prompt=hand_select.get("prompt") or "",
             rewards_items=rewards.get("items") or [],
             card_select_can_confirm=bool(card_select.get("can_confirm")),
             hand_card_names={c["index"]: c["name"] for c in (player.get("hand") or []) if "name" in c},
+            hand_card_target_types={c["index"]: c["target_type"] for c in (player.get("hand") or []) if "target_type" in c},
             card_reward_names=[c["name"] for c in (card_reward_data.get("cards") or []) if "name" in c],
             rest_site_can_proceed=bool(rest_site_data.get("can_proceed")),
             rest_site_options=rest_site_data.get("options") or [],

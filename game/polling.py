@@ -105,13 +105,40 @@ async def poll_game_state(
                             and previous_state.hand_size is not None
                             and state.hand_size < previous_state.hand_size
                         ):
-                            # Card was played mid-turn — re-queue so the next card can be voted on
-                            logger.info(
-                                "Card played mid-turn (hand %d → %d) — re-queuing vote",
-                                previous_state.hand_size,
-                                state.hand_size,
-                            )
-                            event_queue.put_nowait(VoteNeededEvent(state))
+                            # Card was played mid-turn — poll briefly before re-queuing a combat
+                            # vote. Some cards (e.g. Dagger Throw) trigger hand_select after a
+                            # short delay; exiting early avoids a stale combat vote in the queue.
+                            # Polls every 0.5s for up to 2.5s, exits as soon as state changes.
+                            recheck_state = state
+                            for _ in range(5):
+                                await asyncio.sleep(0.5)
+                                recheck_data = await client.get_state()
+                                if not recheck_data:
+                                    break
+                                try:
+                                    recheck_state = GameState.from_api_response(recheck_data)
+                                except ValueError:
+                                    break
+                                if recheck_state.state_type != state.state_type:
+                                    break  # state changed — exit early
+
+                            if recheck_state.state_type != state.state_type:
+                                # State already changed — queue new state directly, skip combat re-queue
+                                logger.info(
+                                    "State changed to '%s' after card play — queuing directly",
+                                    recheck_state.state_type,
+                                )
+                                if recheck_state.requires_player_input():
+                                    event_queue.put_nowait(VoteNeededEvent(recheck_state))
+                            else:
+                                logger.info(
+                                    "Card played mid-turn (hand %d → %d) — re-queuing vote",
+                                    previous_state.hand_size,
+                                    recheck_state.hand_size,
+                                )
+                                event_queue.put_nowait(VoteNeededEvent(recheck_state))
+                            # Update state so previous_state = state (line below) uses recheck_state
+                            state = recheck_state
                     elif state.state_type == "event":
                         curr_key = [(o.get("index"), o.get("title")) for o in state.event_options]
                         prev_key = [(o.get("index"), o.get("title")) for o in previous_state.event_options]

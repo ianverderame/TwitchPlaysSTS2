@@ -6,18 +6,18 @@
 ## Recently Completed
 - #26 — Mid-event option change detection: rewards auto-handling, dynamic options, auto-confirm; live-tested
 - #28 — Descriptive vote labels: `!N=Label` for all in-run states; `game/labels.py`; map left→right preamble; dynamic rest_site/map/shop options; shop shows name+price, filters unaffordable+full-belt potions
-  - Live-tested: combat, event, card_reward, map, rest_site, card_select
-  - Remaining edge cases tracked in #35 (shop names, relic_select, treasure, hand_select)
+  - Remaining edge cases tracked in #38 (shop names, relic_select, treasure, hand_select, polling hang)
+- #34 — Multi-target card voting: AnyEnemy → follow-up target vote with `Name (hp/max_hphp)` labels; auto-target on single enemy; `hand_select` race condition fix; bot launch vote fix
+  - Live-tested: multi-enemy (Strike/Neutralize), single-enemy (Dagger Throw auto-target), AllEnemies/Self/None skip, Dagger Throw chain (target vote → hand_select)
 
 ## Active Issue
 None
 
 ## Up Next
-1. #35 — Live-test remaining label states (shop, relic_select, treasure, hand_select)
+1. #38 — Pre-1.0 edge cases (shop labels, relic_select, treasure, hand_select, polling hang)
 2. #7 — Database Logging
 3. #9 — Production Hardening
 4. #33 — Rest site Smith: card selection via chat
-5. #34 — Combat: multi-target card voting
 
 ## Key Decisions
 - Bot and game run on same PC (localhost API)

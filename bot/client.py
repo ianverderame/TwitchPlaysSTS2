@@ -10,7 +10,7 @@ from game.actions import build_api_body
 from game.api_client import STS2Client
 from game.events import GameEndedEvent, GameEvent, GameStartedEvent, MenuSelectNeededEvent, VoteNeededEvent
 from game.menu_client import MenuClient
-from game.labels import labels_for_state, preamble_for_state
+from game.labels import labels_for_state, preamble_for_state, target_labels_for_enemies
 from game.options import options_for_state
 from game.state import GameState
 
@@ -59,6 +59,8 @@ class TwitchBot(commands.Bot):
         self._game_client = game_client
         self._menu_client = menu_client
         self.vote_manager = VoteManager(config["vote"]["duration_seconds"])
+        self._target_vote_duration: float = config["vote"]["target_duration_seconds"]
+        self._ready = asyncio.Event()  # set in event_ready; gates _event_runner
 
         super().__init__(
             client_id=config["twitch"]["client_id"],
@@ -93,6 +95,7 @@ class TwitchBot(commands.Bot):
             sender=self.bot_id,
             token_for=self.bot_id,
         )
+        self._ready.set()
 
     async def event_command_error(self, payload: commands.CommandErrorPayload) -> None:
         # !1, !end, !left, etc. are not registered commands — silence the noise.
@@ -103,6 +106,7 @@ class TwitchBot(commands.Bot):
     async def _event_runner(self) -> None:
         """Background task: dequeue GameEvents and handle each in chat."""
         logger.info("Event runner started")
+        await self._ready.wait()  # ensure event_ready has fired before sending to chat
         users = await self.fetch_users(ids=[self._owner_id])
         broadcaster: twitchio.PartialUser = users[0]
 
@@ -197,6 +201,17 @@ class TwitchBot(commands.Bot):
                         preamble=preamble_for_state(event.state),
                     )
 
+                    # AnyEnemy cards require a follow-up target vote when multiple enemies
+                    # are alive. resolved_target is passed through to build_api_body.
+                    resolved_target: str | None = None
+                    if winner.isdigit() and event.state.is_combat_state():
+                        card_index = int(winner) - 1
+                        target_type = event.state.hand_card_target_types.get(card_index, "")
+                        if target_type == "AnyEnemy":
+                            resolved_target = await self._run_target_vote(
+                                broadcaster, winner, event.state
+                            )
+
                     # Re-fetch state so action uses fresh data (e.g. enemies list
                     # may be empty on the first monster poll that queued the vote).
                     fresh_data = await self._game_client.get_state()
@@ -230,7 +245,7 @@ class TwitchBot(commands.Bot):
                         continue
 
                     try:
-                        body = build_api_body(action_state, winner)
+                        body = build_api_body(action_state, winner, target_entity_id=resolved_target)
                     except ValueError:
                         logger.error(
                             "No API mapping for state=%s winner=%s — skipping action",
@@ -282,6 +297,69 @@ class TwitchBot(commands.Bot):
                 raise
             except Exception:
                 logger.error("Unexpected error in event runner", exc_info=True)
+
+    async def _run_target_vote(
+        self,
+        broadcaster: twitchio.PartialUser,
+        card_winner: str,
+        event_state: GameState,
+    ) -> str | None:
+        """Run a follow-up target-selection vote for an AnyEnemy card.
+
+        Returns the chosen entity_id, or None if the enemy list is empty
+        (combat ended — the stale-vote guard downstream will handle it).
+        Auto-targets when only one enemy is alive (no vote needed).
+        """
+        card_index = int(card_winner) - 1
+        card_name = event_state.hand_card_names.get(card_index, f"Card {card_winner}")
+        enemies = event_state.enemies
+
+        if len(enemies) == 1:
+            logger.info("AnyEnemy card '%s' — single enemy, auto-targeting %s", card_name, enemies[0]["name"])
+            return enemies[0]["entity_id"]
+
+        if not enemies:
+            return None
+
+        target_options = [str(i + 1) for i in range(len(enemies))]
+        target_labels = target_labels_for_enemies(enemies)
+
+        target_winner = await self.vote_manager.run_window(
+            broadcaster=broadcaster,
+            bot_id=self.bot_id,
+            options=target_options,
+            state_summary=f"target select for {card_name}",
+            labels=target_labels,
+            preamble=f"{card_name} \u2014 choose target:",
+            duration=self._target_vote_duration,
+        )
+
+        # Guard: re-check enemy list after vote (theoretically impossible to change in SP)
+        guard_data = await self._game_client.get_state()
+        current_enemies = enemies
+        if guard_data:
+            try:
+                guard_state = GameState.from_api_response(guard_data)
+                if guard_state.enemies:
+                    current_enemies = guard_state.enemies
+            except ValueError:
+                pass
+
+        if len(current_enemies) == 1:
+            logger.info("Enemy list changed to 1 after target vote — auto-targeting %s", current_enemies[0]["name"])
+            return current_enemies[0]["entity_id"]
+
+        if current_enemies:
+            target_idx = int(target_winner) - 1
+            if target_idx >= len(current_enemies):
+                logger.warning(
+                    "Target index %d out of range for %d enemies — defaulting to first",
+                    target_idx, len(current_enemies),
+                )
+                target_idx = 0
+            return current_enemies[target_idx]["entity_id"]
+
+        return None  # combat ended; stale-vote guard handles it
 
     async def _handle_rewards(self) -> None:
         """Auto-claim all non-card rewards, open card rewards for a chat vote, then proceed.
