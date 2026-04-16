@@ -8,10 +8,10 @@
 - #28 — Descriptive vote labels: `!N=Label` for all in-run states; `game/labels.py`; map left→right preamble; dynamic rest_site/map/shop options; shop shows name+price, filters unaffordable+full-belt potions
   - Remaining edge cases tracked in #38 (shop names, relic_select, treasure, hand_select, polling hang)
 - #34 — Multi-target card voting: AnyEnemy → follow-up target vote with `Name (hp/max_hphp)` labels; auto-target on single enemy; `hand_select` race condition fix; bot launch vote fix
-  - Live-tested: multi-enemy (Strike/Neutralize), single-enemy (Dagger Throw auto-target), AllEnemies/Self/None skip, Dagger Throw chain (target vote → hand_select)
+- #32 — Card lookup: `((name))` searches all piles → name+cost+description+wiki.gg link; `?N` looks up hand slot N; multi-card in one message; works at any game state; live-tested
 
 ## Active Issue
-#32 — `!lookup <card name>`: cost + description + fandom wiki link; searches all card piles; works anytime bot is online
+None
 
 ## Up Next
 1. #38 — Pre-1.0 edge cases (shop labels, relic_select, treasure, hand_select, polling hang)
