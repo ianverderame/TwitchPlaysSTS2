@@ -18,6 +18,7 @@ class GameState:
     player_potion_count: int = 0               # len(player.potions) — for shop potion availability
     player_energy: int | None = None      # player.energy (combat only)
     is_play_phase: bool | None = None          # battle.is_play_phase (combat only)
+    battle_round: int | None = None            # battle.round — increments each full turn cycle
     hand_size: int | None = None               # len(player.hand) — used for mid-turn re-queue detection
     playable_card_indices: list[int] = field(default_factory=list)  # hand indices of can_play=True cards
     enemies: list[dict] = field(default_factory=list)  # Combat only; empty outside combat
@@ -75,6 +76,7 @@ class GameState:
             player_potion_count=len(player.get("potions") or []),
             player_energy=player.get("energy"),
             is_play_phase=battle.get("is_play_phase"),
+            battle_round=battle.get("round"),
             hand_size=len(player.get("hand") or []),
             playable_card_indices=[
                 c["index"] for c in (player.get("hand") or []) if c.get("can_play")
