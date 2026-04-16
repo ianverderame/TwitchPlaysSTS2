@@ -95,9 +95,23 @@ async def poll_game_state(
                     _log_within_state_changes(previous_state, state)
                     if state.is_combat_state() and state.is_play_phase:
                         if not previous_state.is_play_phase:
-                            # Edge: enemy turn → player turn
+                            # Edge: enemy turn → player turn (caught by poller)
                             logger.info(
                                 "Player turn started (is_play_phase=True) — queuing vote"
+                            )
+                            event_queue.put_nowait(VoteNeededEvent(state))
+                        elif (
+                            state.battle_round is not None
+                            and previous_state.battle_round is not None
+                            and state.battle_round > previous_state.battle_round
+                        ):
+                            # Enemy turn completed faster than the poll interval — both
+                            # snapshots have is_play_phase=True, but battle.round incremented,
+                            # which is a definitive signal that a new player turn started.
+                            logger.info(
+                                "New player turn detected (battle round %d → %d, enemy turn missed by poller) — queuing vote",
+                                previous_state.battle_round,
+                                state.battle_round,
                             )
                             event_queue.put_nowait(VoteNeededEvent(state))
                         elif (
