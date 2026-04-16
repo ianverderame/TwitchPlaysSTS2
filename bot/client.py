@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 
 import twitchio
 from twitchio import eventsub
@@ -16,11 +17,38 @@ from game.state import GameState
 
 logger = logging.getLogger(__name__)
 
-_WIKI_BASE = "https://slay-the-spire.fandom.com/wiki/"
+_WIKI_BASE = "https://slaythespire.wiki.gg/wiki/Slay_the_Spire_2:"
 
 
 def _wiki_url(card_name: str) -> str:
-    return _WIKI_BASE + card_name.replace(" ", "_")
+    return _WIKI_BASE + card_name.title().replace(" ", "_")
+
+
+def _format_card_message(card_data: dict) -> str:
+    """Format a card dict into a chat-ready string: name | cost | description | wiki url."""
+    name: str = card_data.get("name", "Unknown")
+    cost = card_data.get("cost")
+    description: str = card_data.get("description", "")
+    url = _wiki_url(name)
+
+    parts = [name]
+    if cost is not None:
+        parts.append(f"{cost} energy")
+    if description:
+        parts.append(description)
+    parts.append(url)
+    message = " | ".join(parts)
+
+    if len(message) > 500:
+        # Drop description if it pushes past Twitch's 500-char limit
+        parts = [name]
+        if cost is not None:
+            parts.append(f"{cost} energy")
+        parts.append(url)
+        message = " | ".join(parts)
+
+    return message
+
 
 
 class ChatComponent(commands.Component):
@@ -29,31 +57,66 @@ class ChatComponent(commands.Component):
         self.vote_manager = vote_manager
         self._game_client = game_client
 
+    async def _send_chat(self, message: str) -> None:
+        """Send a message to the broadcaster's channel."""
+        users = await self.bot.fetch_users(ids=[self.bot._owner_id])
+        if users:
+            await users[0].send_message(
+                message=message,
+                sender=self.bot.bot_id,
+                token_for=self.bot.bot_id,
+            )
+
     @commands.Component.listener()
     async def event_message(self, payload: twitchio.ChatMessage) -> None:
         text = payload.text.strip()
+
+        # ?N — slot lookup: show card info for vote slot N from the current hand
+        if text.startswith("?"):
+            arg = text[1:].strip().split()[0] if text[1:].strip() else ""
+            if arg.isdigit():
+                await self._handle_slot_lookup(arg)
+            return
+
+        # ((name)) — card lookup, one response per match in the message
+        matches = re.findall(r'\(\((.+?)\)\)', text)
+        if matches:
+            for query in matches:
+                query = query.strip()
+                if query:
+                    await self._handle_name_lookup(query)
+            return
+
         if not text.startswith("!") or not self.vote_manager.is_open:
             return
         choice = text[1:].split()[0].lower()
         if choice:
             self.vote_manager.record_vote(payload.chatter.id, choice)
 
-    @commands.command()
-    async def lookup(self, ctx: commands.Context) -> None:
-        """Look up any card by name. Shows cost + description + wiki link."""
-        parts = ctx.message.text.strip().split(None, 1)
-        if len(parts) < 2 or not parts[1].strip():
-            await ctx.channel.send_message(
-                sender=self.bot.bot_id,
-                message="Usage: !lookup <card name>",
-                token_for=self.bot.bot_id,
-            )
-            return
+    async def _handle_slot_lookup(self, arg: str) -> None:
+        """Respond to ?N with card info for vote slot N from the current hand."""
+        slot = int(arg) - 1  # 1-indexed vote slot → 0-indexed hand index
+        raw_data = await self._game_client.get_state()
+        if not raw_data:
+            return  # game not running — silently ignore
 
-        query = parts[1].strip()
+        hand: list[dict] = (raw_data.get("player") or {}).get("hand") or []
+        card_data = next((c for c in hand if c.get("index") == slot), None)
+
+        if card_data:
+            await self._send_chat(_format_card_message(card_data))
+        else:
+            await self._send_chat(f"No card at slot {arg}.")
+
+    async def _handle_name_lookup(self, query: str) -> None:
+        """Respond to ((name)) with card info + wiki.gg link.
+
+        If the card is in the current piles, includes cost and description from
+        the game API. Always falls back to a wiki link using the queried name.
+        """
+        resolved_name = query.title()
         card_data: dict | None = None
 
-        # Search all card piles so the command works regardless of game state
         raw_data = await self._game_client.get_state()
         if raw_data:
             player = raw_data.get("player") or {}
@@ -64,38 +127,16 @@ class ChatComponent(commands.Component):
                 + list(player.get("exhaust_pile") or [])
             )
             q_lower = query.lower()
-            card_data = next((c for c in all_cards if q_lower in c.get("name", "").lower()), None)
+            card_data = next(
+                (c for c in all_cards if c.get("name", "").lower() in q_lower), None
+            )
+            if card_data:
+                resolved_name = card_data["name"]
 
         if card_data:
-            name: str = card_data.get("name", query)
-            cost = card_data.get("cost")
-            description: str = card_data.get("description", "")
-            url = _wiki_url(name)
-
-            msg_parts = [name]
-            if cost is not None:
-                msg_parts.append(f"{cost} energy")
-            if description:
-                msg_parts.append(description)
-            msg_parts.append(url)
-            message = " | ".join(msg_parts)
-
-            if len(message) > 500:
-                # Drop description if it pushes past Twitch's 500-char limit
-                msg_parts = [name]
-                if cost is not None:
-                    msg_parts.append(f"{cost} energy")
-                msg_parts.append(url)
-                message = " | ".join(msg_parts)
+            await self._send_chat(_format_card_message(card_data))
         else:
-            # Game not running or card not in any pile — provide wiki link for the name as typed
-            message = f"{query} | {_wiki_url(query)}"
-
-        await ctx.channel.send_message(
-            sender=self.bot.bot_id,
-            message=message,
-            token_for=self.bot.bot_id,
-        )
+            await self._send_chat(f"{resolved_name} | {_wiki_url(resolved_name)}")
 
     @commands.command()
     async def test(self, ctx: commands.Context) -> None:
