@@ -16,11 +16,18 @@ from game.state import GameState
 
 logger = logging.getLogger(__name__)
 
+_WIKI_BASE = "https://slay-the-spire.fandom.com/wiki/"
+
+
+def _wiki_url(card_name: str) -> str:
+    return _WIKI_BASE + card_name.replace(" ", "_")
+
 
 class ChatComponent(commands.Component):
-    def __init__(self, bot: "TwitchBot", vote_manager: VoteManager) -> None:
+    def __init__(self, bot: "TwitchBot", vote_manager: VoteManager, game_client: STS2Client) -> None:
         self.bot = bot
         self.vote_manager = vote_manager
+        self._game_client = game_client
 
     @commands.Component.listener()
     async def event_message(self, payload: twitchio.ChatMessage) -> None:
@@ -30,6 +37,65 @@ class ChatComponent(commands.Component):
         choice = text[1:].split()[0].lower()
         if choice:
             self.vote_manager.record_vote(payload.chatter.id, choice)
+
+    @commands.command()
+    async def lookup(self, ctx: commands.Context) -> None:
+        """Look up any card by name. Shows cost + description + wiki link."""
+        parts = ctx.message.text.strip().split(None, 1)
+        if len(parts) < 2 or not parts[1].strip():
+            await ctx.channel.send_message(
+                sender=self.bot.bot_id,
+                message="Usage: !lookup <card name>",
+                token_for=self.bot.bot_id,
+            )
+            return
+
+        query = parts[1].strip()
+        card_data: dict | None = None
+
+        # Search all card piles so the command works regardless of game state
+        raw_data = await self._game_client.get_state()
+        if raw_data:
+            player = raw_data.get("player") or {}
+            all_cards: list[dict] = (
+                list(player.get("hand") or [])
+                + list(player.get("draw_pile") or [])
+                + list(player.get("discard_pile") or [])
+                + list(player.get("exhaust_pile") or [])
+            )
+            q_lower = query.lower()
+            card_data = next((c for c in all_cards if q_lower in c.get("name", "").lower()), None)
+
+        if card_data:
+            name: str = card_data.get("name", query)
+            cost = card_data.get("cost")
+            description: str = card_data.get("description", "")
+            url = _wiki_url(name)
+
+            msg_parts = [name]
+            if cost is not None:
+                msg_parts.append(f"{cost} energy")
+            if description:
+                msg_parts.append(description)
+            msg_parts.append(url)
+            message = " | ".join(msg_parts)
+
+            if len(message) > 500:
+                # Drop description if it pushes past Twitch's 500-char limit
+                msg_parts = [name]
+                if cost is not None:
+                    msg_parts.append(f"{cost} energy")
+                msg_parts.append(url)
+                message = " | ".join(msg_parts)
+        else:
+            # Game not running or card not in any pile — provide wiki link for the name as typed
+            message = f"{query} | {_wiki_url(query)}"
+
+        await ctx.channel.send_message(
+            sender=self.bot.bot_id,
+            message=message,
+            token_for=self.bot.bot_id,
+        )
 
     @commands.command()
     async def test(self, ctx: commands.Context) -> None:
@@ -76,7 +142,7 @@ class TwitchBot(commands.Bot):
         await self.add_token(self._bot_token, self._bot_refresh_token)
 
     async def setup_hook(self) -> None:
-        await self.add_component(ChatComponent(self, self.vote_manager))
+        await self.add_component(ChatComponent(self, self.vote_manager, self._game_client))
 
         payload = eventsub.ChatMessageSubscription(
             broadcaster_user_id=self._owner_id,

@@ -11,7 +11,7 @@
   - Live-tested: multi-enemy (Strike/Neutralize), single-enemy (Dagger Throw auto-target), AllEnemies/Self/None skip, Dagger Throw chain (target vote → hand_select)
 
 ## Active Issue
-None
+#32 — `!lookup <card name>`: cost + description + fandom wiki link; searches all card piles; works anytime bot is online
 
 ## Up Next
 1. #38 — Pre-1.0 edge cases (shop labels, relic_select, treasure, hand_select, polling hang)
