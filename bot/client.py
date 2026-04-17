@@ -111,6 +111,11 @@ class ChatComponent(commands.Component):
                 await self._handle_potions_list()
             return
 
+        # !help — always available, not gated on vote state
+        if text.lower() == "!help":
+            await self._handle_help()
+            return
+
         # ((name)) — card lookup, one response per match in the message
         matches = re.findall(r'\(\((.+?)\)\)', text)
         if matches:
@@ -125,6 +130,13 @@ class ChatComponent(commands.Component):
         choice = text[1:].split()[0].lower()
         if choice:
             self.vote_manager.record_vote(payload.chatter.id, choice)
+
+    async def _handle_help(self) -> None:
+        """Respond to !help with a concise viewer command reference."""
+        await self._send_chat(
+            "Commands: !N=vote | !pN=use potion N | !dN=discard potion N"
+            " | ?map=map preview | ?p/?potions=potion belt | ?N=card in slot N | ((name))=card lookup"
+        )
 
     async def _handle_slot_lookup(self, arg: str) -> None:
         """Respond to ?N with card info for vote slot N from the current hand."""
