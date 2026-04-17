@@ -47,11 +47,16 @@ class VoteManager:
         labels: dict[str, str] | None = None,
         preamble: str = "Vote open!",
         duration: float | None = None,
+        silent: bool = False,
     ) -> str:
         """Open a vote window, collect votes, tally, announce winner.
 
         Always returns a winning choice string. If no votes were cast or votes
         are tied, a winner is chosen randomly and chat is notified.
+
+        When ``silent=True`` the opening options message is suppressed. Use this
+        when the caller has already announced the vote (e.g. smith upgrade posts
+        a card list before calling run_window).
         """
         self._votes = {}
         self._options = frozenset(options)
@@ -60,16 +65,17 @@ class VoteManager:
 
         effective_duration = duration if duration is not None else self._duration
 
-        parts = [
-            f"!{o}={labels[o]}" if (labels and o in labels) else f"!{o}"
-            for o in options
-        ]
-        options_str = "  ".join(parts)
-        await broadcaster.send_message(
-            message=f"{preamble} {options_str}  ({effective_duration:.0f}s)",
-            sender=bot_id,
-            token_for=bot_id,
-        )
+        if not silent:
+            parts = [
+                f"!{o}={labels[o]}" if (labels and o in labels) else f"!{o}"
+                for o in options
+            ]
+            options_str = "  ".join(parts)
+            await broadcaster.send_message(
+                message=f"{preamble} {options_str}  ({effective_duration:.0f}s)",
+                sender=bot_id,
+                token_for=bot_id,
+            )
 
         await asyncio.sleep(effective_duration)
 
