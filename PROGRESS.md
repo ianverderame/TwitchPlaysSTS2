@@ -4,6 +4,7 @@
 `PoC`
 
 ## Recently Completed
+- #31 — ?map command: text preview of upcoming map nodes (up to 8 floors); `?` info command convention; self-message guard; live-tested
 - #47 — Silent stops: auto-proceed treasure/rest_site; shop re-queue + leave-only fallback; playable_card_indices change detection (relic card draw); diagnostic DEBUG logging; live-tested
 - #33 — Smith upgrade: deck-wide card vote; dedup identical copies (e.g. `Defend (x5)`); numbered `!N` voting; 30s window; green announcement header; select_card + confirm_selection flow; live-tested
 - #28 — Descriptive vote labels: `!N=Label` for all in-run states; `game/labels.py`; map left→right preamble; dynamic rest_site/map/shop options; shop shows name+price, filters unaffordable+full-belt potions
