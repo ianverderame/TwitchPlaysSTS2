@@ -11,7 +11,7 @@ from game.actions import build_api_body
 from game.api_client import STS2Client
 from game.events import GameEndedEvent, GameEvent, GameStartedEvent, MenuSelectNeededEvent, VoteNeededEvent
 from game.menu_client import MenuClient
-from game.labels import labels_for_state, preamble_for_state, target_labels_for_enemies
+from game.labels import MAP_ROOM_LABELS, labels_for_state, preamble_for_state, target_labels_for_enemies
 from game.options import options_for_state
 from game.state import GameState
 
@@ -96,13 +96,17 @@ class ChatComponent(commands.Component):
 
     @commands.Component.listener()
     async def event_message(self, payload: twitchio.ChatMessage) -> None:
+        if payload.chatter.id == self.bot.bot_id:
+            return
         text = payload.text.strip()
 
-        # ?N — slot lookup: show card info for vote slot N from the current hand
+        # ? commands — informational lookups (never affect votes)
         if text.startswith("?"):
             arg = text[1:].strip().split()[0] if text[1:].strip() else ""
             if arg.isdigit():
                 await self._handle_slot_lookup(arg)
+            elif arg.lower() == "map":
+                await self._handle_map_preview()
             return
 
         # ((name)) — card lookup, one response per match in the message
@@ -164,6 +168,56 @@ class ChatComponent(commands.Component):
             await self._send_chat(_format_card_message(card_data))
         else:
             await self._send_chat(f"{resolved_name} | {_wiki_url(resolved_name)}")
+
+    async def _handle_map_preview(self) -> None:
+        """Respond to ?map with a text preview of upcoming map nodes."""
+        raw_data = await self._game_client.get_state()
+        if not raw_data:
+            return
+
+        map_data = raw_data.get("map") or {}
+        if not map_data:
+            state_type = raw_data.get("state_type", "")
+            if state_type == "menu":
+                await self._send_chat("No run in progress.")
+            else:
+                await self._send_chat("?map command is only available on the map screen.")
+            return
+
+        nodes: list[dict] = map_data.get("nodes") or []
+        current_pos: dict = map_data.get("current_position") or {}
+        current_row: int = current_pos.get("row", -1)
+
+        run = raw_data.get("run") or {}
+        act = run.get("act")
+        floor_num = run.get("floor")
+
+        rows_by_row: dict[int, list[str]] = {}
+        for node in nodes:
+            node_row = node.get("row")
+            if node_row is None or node_row <= current_row:
+                continue
+            label = MAP_ROOM_LABELS.get((node.get("type") or "").upper(), node.get("type") or "?")
+            if node_row not in rows_by_row:
+                rows_by_row[node_row] = []
+            if label not in rows_by_row[node_row]:
+                rows_by_row[node_row].append(label)
+
+        if not rows_by_row:
+            await self._send_chat("No upcoming nodes.")
+            return
+
+        sorted_rows = sorted(rows_by_row.keys())[:8]
+        header = f"[Act {act} F{floor_num}] " if act and floor_num else "[Map] "
+        parts = [f"F{r}: {'/'.join(rows_by_row[r])}" for r in sorted_rows]
+
+        sep = " → "
+        message = header + sep.join(parts)
+        while len(message) > 490 and parts:
+            parts.pop()
+            message = header + sep.join(parts)
+
+        await self._send_chat(message)
 
     @commands.command()
     async def test(self, ctx: commands.Context) -> None:
