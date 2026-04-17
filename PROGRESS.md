@@ -4,11 +4,11 @@
 `PoC`
 
 ## Recently Completed
+- #56 — !help command (any time, not vote-gated) + README (setup, .env, mods, commands cheat sheet); live-tested
 - #51 — Potions: use/discard voting (!pN/!dN), belt filter in shop, AnyEnemy target vote, ?potions/?p command, dry-run mode, file logging, auto_proceed_delay config; live-tested
 - #38 (partial) — hand_select multi-select (can_confirm); treasure auto-claim + 3s pause; shop gold preamble, auto-leave, Remove Card grouped vote; rest site auto-proceed retry loop; Ancient relic vote (event state); single map node auto-select (5s); all 8 map node types confirmed
 - #31 — ?map command: text preview of upcoming map nodes (up to 8 floors); `?` info command convention; self-message guard; live-tested
 - #47 — Silent stops: auto-proceed treasure/rest_site; shop re-queue + leave-only fallback; playable_card_indices change detection (relic card draw); diagnostic DEBUG logging; live-tested
-- #33 — Smith upgrade: deck-wide card vote; dedup identical copies (e.g. `Defend (x5)`); numbered `!N` voting; 30s window; green announcement header; select_card + confirm_selection flow; live-tested
 
 ## Active Issue
 None
