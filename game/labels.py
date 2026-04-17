@@ -133,6 +133,9 @@ def preamble_for_state(state: GameState) -> str:
     """
     if state.state_type == "map":
         return "Map (left -> right):"
+    if state.state_type in ("shop", "fake_merchant"):
+        gold_str = f" | Gold: {state.player_gold}g" if state.player_gold is not None else ""
+        return f"Vote open!{gold_str}"
     if state.state_type == "hand_select" and state.hand_select_prompt:
         return f"{state.hand_select_prompt.rstrip('.')}:"
     return "Vote open!"

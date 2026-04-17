@@ -90,6 +90,9 @@ def options_for_state(state: GameState) -> list[str]:
         # Derive options from actual event options, skipping locked ones
         return [str(o["index"] + 1) for o in state.event_options if not o.get("is_locked")]
 
+    if state.state_type == "relic_select" and state.relic_select_relics:
+        return [str(r["index"] + 1) for r in state.relic_select_relics] + ["skip"]
+
     options = KNOWN_STATES.get(state.state_type)
     if options is None:
         logger.warning(
