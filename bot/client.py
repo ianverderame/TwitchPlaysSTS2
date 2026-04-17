@@ -247,7 +247,9 @@ class TwitchBot(commands.Bot):
 
         while True:
             try:
+                logger.debug("Event runner: waiting for event (queue size=%d)", self._event_queue.qsize())
                 event: GameEvent = await self._event_queue.get()
+                logger.info("Event runner: processing %s", type(event).__name__)
 
                 if isinstance(event, GameStartedEvent):
                     logger.info("Game started: %s", event.state.summary())
@@ -423,8 +425,37 @@ class TwitchBot(commands.Bot):
                     else:
                         logger.info("Action executed: %s → %s", winner, result)
 
+                    # shop/fake_merchant: re-queue vote after successful purchase — player may want to buy more
+                    if action_state.state_type in ("shop", "fake_merchant") and body.get("action") == "shop_purchase" and result is not None:
+                        post_shop_data = await self._game_client.get_state()
+                        if post_shop_data:
+                            try:
+                                post_shop_state = GameState.from_api_response(post_shop_data)
+                                if post_shop_state.state_type == action_state.state_type:
+                                    logger.info("Shop purchase complete — re-queuing vote")
+                                    self._event_queue.put_nowait(VoteNeededEvent(post_shop_state))
+                            except ValueError:
+                                pass
+
+                    # rest_site: auto-proceed after choosing an option (Rest/Smith/etc.)
+                    if action_state.state_type == "rest_site" and body.get("action") == "choose_rest_option":
+                        post_rest_data = await self._game_client.get_state()
+                        if post_rest_data:
+                            try:
+                                post_rest_state = GameState.from_api_response(post_rest_data)
+                                if post_rest_state.state_type == "rest_site" and post_rest_state.rest_site_can_proceed:
+                                    proceed_result = await self._game_client.post_action({"action": "proceed"})
+                                    logger.info("Auto-proceeded after rest_site option → %s", proceed_result)
+                            except ValueError:
+                                pass
+
+                    # treasure: auto-proceed after relic claim — game stays in treasure state
+                    elif action_state.state_type == "treasure" and body.get("action") == "claim_treasure_relic":
+                        proceed_result = await self._game_client.post_action({"action": "proceed"})
+                        logger.info("Auto-proceeded after treasure relic claim → %s", proceed_result)
+
                     # hand_select: auto-confirm after card selection — no second vote needed
-                    if action_state.state_type == "hand_select" and body.get("action") == "combat_select_card":
+                    elif action_state.state_type == "hand_select" and body.get("action") == "combat_select_card":
                         confirm_result = await self._game_client.post_action({"action": "combat_confirm_selection"})
                         logger.info("Auto-confirmed hand_select → %s", confirm_result)
 

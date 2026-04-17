@@ -88,12 +88,17 @@ async def poll_game_state(
                     elif state.requires_player_input():
                         logger.info("Queuing vote for state: %s", state.state_type)
                         event_queue.put_nowait(VoteNeededEvent(state))
+                    else:
+                        logger.info("State '%s' does not require player input — no vote queued", state.state_type)
                     previous_state = state
 
                 else:
                     # Same state_type — check for within-state changes
                     _log_within_state_changes(previous_state, state)
-                    if state.is_combat_state() and state.is_play_phase:
+                    logger.debug("Poll: same state '%s'", state.state_type)
+                    if state.is_combat_state() and not state.is_play_phase:
+                        logger.debug("Combat '%s': enemy turn (is_play_phase=False)", state.state_type)
+                    elif state.is_combat_state() and state.is_play_phase:
                         if not previous_state.is_play_phase:
                             # Edge: enemy turn → player turn (caught by poller)
                             logger.info(
@@ -118,11 +123,12 @@ async def poll_game_state(
                             state.hand_size is not None
                             and previous_state.hand_size is not None
                             and state.hand_size < previous_state.hand_size
+                        ) or (
+                            set(state.playable_card_indices) != set(previous_state.playable_card_indices)
                         ):
-                            # Card was played mid-turn — poll briefly before re-queuing a combat
-                            # vote. Some cards (e.g. Dagger Throw) trigger hand_select after a
-                            # short delay; exiting early avoids a stale combat vote in the queue.
-                            # Polls every 0.5s for up to 2.5s, exits as soon as state changes.
+                            # Card was played mid-turn, or playable cards changed (e.g. relic drew
+                            # a card, restoring hand size). Poll briefly before re-queuing — some
+                            # cards (e.g. Dagger Throw) trigger hand_select after a short delay.
                             recheck_state = state
                             for _ in range(5):
                                 await asyncio.sleep(0.5)
@@ -153,6 +159,13 @@ async def poll_game_state(
                                 event_queue.put_nowait(VoteNeededEvent(recheck_state))
                             # Update state so previous_state = state (line below) uses recheck_state
                             state = recheck_state
+                        else:
+                            logger.debug(
+                                "Combat '%s': player turn, no new-turn trigger (round=%s, hand=%s)",
+                                state.state_type,
+                                state.battle_round,
+                                state.hand_size,
+                            )
                     elif state.state_type == "event":
                         curr_key = [(o.get("index"), o.get("title")) for o in state.event_options]
                         prev_key = [(o.get("index"), o.get("title")) for o in previous_state.event_options]
