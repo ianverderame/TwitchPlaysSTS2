@@ -10,7 +10,9 @@ vote:
   smith_vote_duration_seconds: 30  # How long the smith upgrade card-selection vote stays open
 
 game:
-  poll_interval_seconds: 1  # How often to check STS2 game state
+  poll_interval_seconds: 1     # How often to check STS2 game state
+  dry_run: false               # true = votes run normally but actions are never sent to the game API
+  auto_proceed_delay_seconds: 3  # Pause before auto-proceeding single-option screens (event/map/treasure)
 
 api:
   sts2mcp_base_url: ""     # Required — set STS2MCP_BASE_URL in .env

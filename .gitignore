@@ -21,6 +21,9 @@ data/
 *.db
 *.sqlite
 
+# Logs
+logs/
+
 # Testing
 .pytest_cache/
 .coverage

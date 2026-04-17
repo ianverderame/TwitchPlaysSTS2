@@ -36,6 +36,71 @@ KNOWN_STATES: dict[str, list[str]] = {
 
 _DEFAULT_MAX_POTION_SLOTS = 3  # STS2 default; may change with certain relics
 
+# States where viewers may want to discard a held potion (e.g. to free belt space
+# before a potion reward or swap at the shop). Combat and map/treasure/card_select
+# screens are excluded — no reason to free a slot mid-fight or mid-selection.
+_POTION_DISCARD_STATES: frozenset[str] = frozenset({
+    "rewards", "shop", "fake_merchant", "rest_site",
+    "map", "treasure", "card_reward", "card_select", "relic_select",
+})
+
+POTION_USE_PREFIX = "p"
+POTION_DISCARD_PREFIX = "d"
+
+# Potions with these target_types require a living enemy to throw at and cannot
+# be used outside combat — even if the potion slot is technically selectable.
+_ENEMY_TARGET_TYPES: frozenset[str] = frozenset({"AnyEnemy", "AllEnemies"})
+
+
+def potion_display_name(potion: dict) -> str:
+    """Human-readable potion name with `Potion N` slot fallback."""
+    return potion.get("name") or f"Potion {potion.get('slot', 0) + 1}"
+
+
+def parse_potion_winner(winner: str) -> tuple[str, int] | None:
+    """Parse a `pN`/`dN` vote winner into (kind, slot_index).
+
+    Returns `("use", slot)`, `("discard", slot)`, or None for non-potion winners.
+    Slot is 0-indexed (matches `use_potion.slot` / `discard_potion.slot` in the API).
+    """
+    if len(winner) < 2 or not winner[1:].isdigit():
+        return None
+    if winner[0] == POTION_USE_PREFIX:
+        return "use", int(winner[1:]) - 1
+    if winner[0] == POTION_DISCARD_PREFIX:
+        return "discard", int(winner[1:]) - 1
+    return None
+
+
+def potion_vote_entries(state: GameState) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Return (use_entries, discard_entries) as lists of (tag, display_name).
+
+    Single source of truth for both `options_for_state` and `labels_for_state`:
+    keeps offered options and their labels from drifting apart. Use eligibility
+    depends on context (combat vs. out-of-combat); discard eligibility depends
+    on state_type alone.
+    """
+    if not state.player_potions:
+        return [], []
+    in_combat = state.is_combat_state() or state.state_type == "hand_select"
+    use_entries: list[tuple[str, str]] = []
+    for p in state.player_potions:
+        target_type = p.get("target_type", "")
+        if in_combat:
+            if not p.get("can_use_in_combat", True):
+                continue
+        else:
+            # Outside combat there are no enemies — skip potions that require one to throw at
+            if target_type in _ENEMY_TARGET_TYPES:
+                continue
+        use_entries.append((f"{POTION_USE_PREFIX}{p['slot'] + 1}", potion_display_name(p)))
+    discard_entries: list[tuple[str, str]] = (
+        [(f"{POTION_DISCARD_PREFIX}{p['slot'] + 1}", potion_display_name(p)) for p in state.player_potions]
+        if state.state_type in _POTION_DISCARD_STATES
+        else []
+    )
+    return use_entries, discard_entries
+
 
 def _shop_item_available(item: dict, state: GameState) -> bool:
     """Return True if a shop item can be meaningfully purchased right now."""
@@ -44,7 +109,7 @@ def _shop_item_available(item: dict, state: GameState) -> bool:
     if not item.get("can_afford", True):
         return False
     # Potions can't be bought when the belt is full
-    if item.get("category") == "potion" and state.player_potion_count >= _DEFAULT_MAX_POTION_SLOTS:
+    if item.get("category") == "potion" and len(state.player_potions) >= _DEFAULT_MAX_POTION_SLOTS:
         return False
     return True
 
@@ -59,6 +124,12 @@ def options_for_state(state: GameState) -> list[str]:
     fallback so voting is never completely blocked. Add new state_types to
     KNOWN_STATES in this module as they are discovered through live testing.
     """
+    base = _base_options_for_state(state)
+    use_entries, discard_entries = potion_vote_entries(state)
+    return base + [tag for tag, _ in use_entries] + [tag for tag, _ in discard_entries]
+
+
+def _base_options_for_state(state: GameState) -> list[str]:
     if state.is_combat_state():
         # Use actual hand positions (1-indexed) so chat options match the in-game card numbers
         numeric = [str(idx + 1) for idx in state.playable_card_indices]

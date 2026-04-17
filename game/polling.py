@@ -132,10 +132,13 @@ async def poll_game_state(
                             and state.hand_size < previous_state.hand_size
                         ) or (
                             set(state.playable_card_indices) != set(previous_state.playable_card_indices)
+                        ) or (
+                            len(state.player_potions) < len(previous_state.player_potions)
                         ):
-                            # Card was played mid-turn, or playable cards changed (e.g. relic drew
-                            # a card, restoring hand size). Poll briefly before re-queuing — some
-                            # cards (e.g. Dagger Throw) trigger hand_select after a short delay.
+                            # Card was played mid-turn, playable cards changed (e.g. relic drew
+                            # a card), or a potion was consumed. Poll briefly before re-queuing —
+                            # some cards (e.g. Dagger Throw) or potions may trigger hand_select
+                            # after a short delay.
                             recheck_state = state
                             for _ in range(5):
                                 await asyncio.sleep(0.5)
@@ -159,9 +162,11 @@ async def poll_game_state(
                                     event_queue.put_nowait(VoteNeededEvent(recheck_state))
                             else:
                                 logger.info(
-                                    "Card played mid-turn (hand %d → %d) — re-queuing vote",
+                                    "Mid-turn change (hand %s → %s, potions %d → %d) — re-queuing vote",
                                     previous_state.hand_size,
                                     recheck_state.hand_size,
+                                    len(previous_state.player_potions),
+                                    len(recheck_state.player_potions),
                                 )
                                 event_queue.put_nowait(VoteNeededEvent(recheck_state))
                             # Update state so previous_state = state (line below) uses recheck_state
