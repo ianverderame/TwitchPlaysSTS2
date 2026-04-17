@@ -28,6 +28,7 @@ class GameState:
     hand_select_prompt: str = ""                                     # hand_select.prompt (hand_select state only)
     rewards_items: list[dict] = field(default_factory=list)          # rewards.items (rewards state only)
     card_select_can_confirm: bool = False                             # card_select.can_confirm (card_select state only)
+    card_select_screen_type: str = ""                                 # card_select.screen_type (e.g. "upgrade", "transform")
     # Label data — human-readable names for vote option display
     hand_card_names: dict[int, str] = field(default_factory=dict)        # hand index → card name (combat)
     hand_card_target_types: dict[int, str] = field(default_factory=dict) # hand index → target_type (combat)
@@ -88,6 +89,7 @@ class GameState:
             hand_select_prompt=hand_select.get("prompt") or "",
             rewards_items=rewards.get("items") or [],
             card_select_can_confirm=bool(card_select.get("can_confirm")),
+            card_select_screen_type=card_select.get("screen_type") or "",
             hand_card_names={c["index"]: c["name"] for c in (player.get("hand") or []) if "name" in c},
             hand_card_target_types={c["index"]: c["target_type"] for c in (player.get("hand") or []) if "target_type" in c},
             card_reward_names=[c["name"] for c in (card_reward_data.get("cards") or []) if "name" in c],

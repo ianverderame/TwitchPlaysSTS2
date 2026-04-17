@@ -4,9 +4,8 @@
 `PoC`
 
 ## Recently Completed
-- #26 — Mid-event option change detection: rewards auto-handling, dynamic options, auto-confirm; live-tested
+- #33 — Smith upgrade: deck-wide card vote; dedup identical copies (e.g. `Defend (x5)`); numbered `!N` voting; 30s window; green announcement header; select_card + confirm_selection flow; live-tested
 - #28 — Descriptive vote labels: `!N=Label` for all in-run states; `game/labels.py`; map left→right preamble; dynamic rest_site/map/shop options; shop shows name+price, filters unaffordable+full-belt potions
-  - Remaining edge cases tracked in #38 (shop names, relic_select, treasure, hand_select, polling hang)
 - #34 — Multi-target card voting: AnyEnemy → follow-up target vote with `Name (hp/max_hphp)` labels; auto-target on single enemy; `hand_select` race condition fix; bot launch vote fix
 - #32 — Card lookup: `((name))` searches all piles → name+cost+description+wiki.gg link; `?N` looks up hand slot N; multi-card in one message; works at any game state; live-tested
 
@@ -17,7 +16,6 @@ None
 1. #38 — Pre-1.0 edge cases (shop labels, relic_select, treasure, hand_select, polling hang)
 2. #7 — Database Logging
 3. #9 — Production Hardening
-4. #33 — Rest site Smith: card selection via chat
 
 ## Key Decisions
 - Bot and game run on same PC (localhost API)

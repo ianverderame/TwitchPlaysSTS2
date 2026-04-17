@@ -7,6 +7,7 @@ twitch:
 vote:
   duration_seconds: 10  # How long each card/action voting window stays open
   target_duration_seconds: 10  # How long the target selection vote stays open
+  smith_vote_duration_seconds: 30  # How long the smith upgrade card-selection vote stays open
 
 game:
   poll_interval_seconds: 1  # How often to check STS2 game state

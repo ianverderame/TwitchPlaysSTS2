@@ -20,6 +20,33 @@ logger = logging.getLogger(__name__)
 _WIKI_BASE = "https://slaythespire.wiki.gg/wiki/Slay_the_Spire_2:"
 
 
+def _chunk_card_list(
+    entries: list[str], max_len: int = 490, separator: str = " | "
+) -> list[list[str]]:
+    """Split a list of card-entry strings into chunks that fit within max_len characters.
+
+    Each chunk will be joined with ``separator`` when sent as a chat message.
+    Entries are never split mid-word; each chunk contains complete entries.
+    """
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    current_len = 0
+    sep_len = len(separator)
+    for entry in entries:
+        # Account for the separator that will be added between entries
+        entry_len = len(entry) + (sep_len if current else 0)
+        if current and current_len + entry_len > max_len:
+            chunks.append(current)
+            current = [entry]
+            current_len = len(entry)
+        else:
+            current.append(entry)
+            current_len += entry_len
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def _wiki_url(card_name: str) -> str:
     return _WIKI_BASE + card_name.title().replace(" ", "_")
 
@@ -167,6 +194,7 @@ class TwitchBot(commands.Bot):
         self._menu_client = menu_client
         self.vote_manager = VoteManager(config["vote"]["duration_seconds"])
         self._target_vote_duration: float = config["vote"]["target_duration_seconds"]
+        self._smith_vote_duration: float = config["vote"].get("smith_vote_duration_seconds", 30.0)
         self._ready = asyncio.Event()  # set in event_ready; gates _event_runner
 
         super().__init__(
@@ -242,6 +270,25 @@ class TwitchBot(commands.Bot):
 
                 elif isinstance(event, VoteNeededEvent) and event.state.state_type == "rewards":
                     await self._handle_rewards()
+
+                elif isinstance(event, VoteNeededEvent) and event.state.card_select_screen_type == "upgrade":
+                    # Smith upgrade — special handling: full deck, deduplication, 30s vote.
+                    # Re-fetch to get the latest card list (avoids acting on stale card data).
+                    smith_data = await self._game_client.get_state()
+                    if smith_data:
+                        try:
+                            smith_state = GameState.from_api_response(smith_data)
+                            if smith_state.card_select_screen_type == "upgrade":
+                                await self._handle_smith_upgrade(broadcaster, smith_state)
+                            else:
+                                logger.warning(
+                                    "Smith upgrade: state moved to '%s' before vote started — discarding",
+                                    smith_state.state_type,
+                                )
+                        except ValueError:
+                            logger.warning("Smith upgrade: could not parse fresh state — discarding")
+                    else:
+                        logger.warning("Smith upgrade: could not fetch fresh state — discarding")
 
                 elif isinstance(event, VoteNeededEvent):
                     # Check 1: discard if the game has already moved on since this
@@ -467,6 +514,128 @@ class TwitchBot(commands.Bot):
             return current_enemies[target_idx]["entity_id"]
 
         return None  # combat ended; stale-vote guard handles it
+
+    async def _handle_smith_upgrade(
+        self,
+        broadcaster: twitchio.PartialUser,
+        state: GameState,
+    ) -> None:
+        """Handle a smith upgrade card-selection vote.
+
+        Fetches the full deck from card_select.cards, deduplicates cards that are
+        absolutely identical (same name, upgrade status, and all other attributes),
+        posts a numbered card list to chat, sends a highlighted announcement as the
+        visual anchor, runs a 30s vote, then submits the winning card to the API.
+
+        Deduplication: two cards are merged when every field except 'index' is equal.
+        The first card's API index is used for the winning vote option. Merged entries
+        are labelled "Name(xN)" so viewers know multiple copies exist.
+        """
+        cards = state.card_select_cards
+        if not cards:
+            logger.warning("Smith upgrade: card_select.cards is empty — skipping")
+            return
+
+        # --- Deduplication ---
+        # Key = all card fields except 'index', sorted for stability
+        def _card_key(card: dict) -> tuple:
+            return tuple(sorted((k, str(v)) for k, v in card.items() if k != "index"))
+
+        key_counts: dict[tuple, int] = {}
+        for card in cards:
+            k = _card_key(card)
+            key_counts[k] = key_counts.get(k, 0) + 1
+
+        seen: set[tuple] = set()
+        # groups: ordered list of (display_label, api_index)
+        groups: list[tuple[str, int]] = []
+        for card in cards:
+            k = _card_key(card)
+            if k not in seen:
+                seen.add(k)
+                name: str = card.get("name") or f"Card {card.get('index', '?')}"
+                count = key_counts[k]
+                label = f"{name} (x{count})" if count > 1 else name
+                groups.append((label, card["index"]))
+
+        options = [str(i + 1) for i in range(len(groups))]
+        option_to_api_index: dict[str, int] = {str(i + 1): groups[i][1] for i in range(len(groups))}
+        labels: dict[str, str] = {str(i + 1): groups[i][0] for i in range(len(groups))}
+
+        duration = self._smith_vote_duration
+        header = f"SMITH UPGRADE ({duration:.0f}s) — Pick a card to upgrade! Type !N for your choice:"
+
+        # --- Announce header (highlighted, visually distinct) ---
+        # Falls back to a regular chat message if the bot's token lacks the
+        # moderator:manage:announcements scope (or any other announcement error).
+        try:
+            await broadcaster.send_announcement(
+                moderator=self.bot_id,
+                message=header,
+                color="green",
+            )
+        except twitchio.HTTPException as exc:
+            logger.warning(
+                "Smith upgrade: send_announcement failed (%s) — falling back to regular message. "
+                "Grant the bot the 'moderator:manage:announcements' scope for highlighted announcements.",
+                exc,
+            )
+            await broadcaster.send_message(
+                message=header,
+                sender=self.bot_id,
+                token_for=self.bot_id,
+            )
+
+        # --- Post numbered card list in ≤490-char chunks ---
+        entries = [f"{i + 1}. {groups[i][0]}" for i in range(len(groups))]
+        for chunk in _chunk_card_list(entries, separator=" | "):
+            await broadcaster.send_message(
+                message=" | ".join(chunk),
+                sender=self.bot_id,
+                token_for=self.bot_id,
+            )
+
+        # --- Run vote (silent: announcement already sent above) ---
+        winner = await self.vote_manager.run_window(
+            broadcaster=broadcaster,
+            bot_id=self.bot_id,
+            options=options,
+            state_summary="smith upgrade",
+            labels=labels,
+            duration=duration,
+            silent=True,
+        )
+
+        # --- Submit selected card to the API ---
+        api_index = option_to_api_index[winner]
+        winner_label = groups[int(winner) - 1][0]
+        result = await self._game_client.post_action({"action": "select_card", "index": api_index})
+        logger.info(
+            "Smith upgrade: selected '%s' (api_index=%d, vote=%s) → %s",
+            winner_label, api_index, winner, result,
+        )
+
+        # --- Confirm the selection (select_card only toggles; confirm commits) ---
+        # Smith upgrades exactly one card, so can_confirm should be True after the
+        # toggle. Re-fetch fresh state in case the game closed the overlay already.
+        post_select_data = await self._game_client.get_state()
+        if post_select_data:
+            try:
+                post_select_state = GameState.from_api_response(post_select_data)
+            except ValueError:
+                post_select_state = None
+            if (
+                post_select_state is not None
+                and post_select_state.state_type == "card_select"
+                and post_select_state.card_select_can_confirm
+            ):
+                confirm_result = await self._game_client.post_action({"action": "confirm_selection"})
+                logger.info("Smith upgrade: confirmed → %s", confirm_result)
+            elif post_select_state is not None and post_select_state.state_type == "card_select":
+                logger.warning(
+                    "Smith upgrade: still in card_select but can_confirm=False — "
+                    "upgrade may not be committed"
+                )
 
     async def _handle_rewards(self) -> None:
         """Auto-claim all non-card rewards, open card rewards for a chat vote, then proceed.
