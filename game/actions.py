@@ -1,5 +1,6 @@
 import logging
 
+from game.options import parse_potion_winner
 from game.state import GameState
 
 logger = logging.getLogger(__name__)
@@ -13,6 +14,18 @@ def build_api_body(state: GameState, winner: str, target_entity_id: str | None =
     bad mappings surface loudly during PoC live testing.
     """
     st = state.state_type
+
+    # Potion actions are state-agnostic — handled before state-specific
+    # branches so potions work in combat and out-of-combat contexts alike.
+    potion_action = parse_potion_winner(winner)
+    if potion_action is not None:
+        kind, slot = potion_action
+        if kind == "use":
+            body: dict = {"action": "use_potion", "slot": slot}
+            if target_entity_id is not None:
+                body["target"] = target_entity_id
+            return body
+        return {"action": "discard_potion", "slot": slot}
 
     if st in {"monster", "elite", "boss"}:
         if winner == "end":

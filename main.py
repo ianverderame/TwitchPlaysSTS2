@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import sys
 
 from bot.client import TwitchBot
@@ -9,10 +10,15 @@ from game.events import GameEvent
 from game.menu_client import MenuClient
 from game.polling import poll_game_state
 
+os.makedirs("logs", exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%H:%M:%S",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("logs/bot.log", mode="w", encoding="utf-8"),
+    ],
 )
 logger = logging.getLogger(__name__)
 
@@ -24,7 +30,11 @@ async def main() -> None:
         logger.error("Startup failed: %s", e)
         sys.exit(1)
 
-    game_client = STS2Client(config["api"]["sts2mcp_base_url"])
+    dry_run = bool(config["game"].get("dry_run", False))
+    if dry_run:
+        logger.warning("DRY RUN MODE — actions will be logged but NOT sent to the game API")
+
+    game_client = STS2Client(config["api"]["sts2mcp_base_url"], dry_run=dry_run)
     menu_client = MenuClient(config["api"]["sts2_menu_base_url"])
 
     state = await game_client.get_state()

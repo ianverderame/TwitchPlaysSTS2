@@ -1,6 +1,6 @@
 import logging
 
-from game.options import _shop_item_available
+from game.options import _shop_item_available, potion_vote_entries
 from game.state import GameState
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,15 @@ MAP_ROOM_LABELS: dict[str, str] = {
 }
 
 
+def _potion_labels(state: GameState) -> dict[str, str]:
+    """Return {pN/dN: label} for held potions, sourced from `potion_vote_entries`."""
+    use_entries, discard_entries = potion_vote_entries(state)
+    return (
+        {tag: f"Use {name}" for tag, name in use_entries}
+        | {tag: f"Discard {name}" for tag, name in discard_entries}
+    )
+
+
 def labels_for_state(state: GameState) -> dict[str, str]:
     """Return {option_str: display_label} for chat vote announcements.
 
@@ -27,6 +36,12 @@ def labels_for_state(state: GameState) -> dict[str, str]:
     for missing word-key labels (e.g. 'cancel' → 'Cancel').
     Returns an empty dict for states with no label data.
     """
+    labels = _base_labels_for_state(state)
+    labels.update(_potion_labels(state))
+    return labels
+
+
+def _base_labels_for_state(state: GameState) -> dict[str, str]:
     if state.is_combat_state():
         labels: dict[str, str] = {
             str(idx + 1): state.hand_card_names.get(idx, f"Option {idx + 1}")

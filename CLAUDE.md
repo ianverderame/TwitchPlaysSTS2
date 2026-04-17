@@ -41,9 +41,9 @@ A "Twitch Plays" bot for Slay the Spire 2. The streamer plays STS2 on PC and str
 ## Running the Bot
 
 - Use `python3 main.py` (not `python` — that command is not found on this machine)
-- Claude runs and monitors the bot during testing sessions; the user focuses on the game
+- The user runs and stops the bot during testing sessions; Claude analyzes `logs/bot.log` when asked
 - TwitchIO logs a non-fatal OSError about port 4343 on startup — this is expected and can be ignored
-- **End of session:** Stop the bot process (via `TaskStop`) before closing out with `/end-session`
+- Logs are written to both the terminal and `logs/bot.log` (truncated on each start); inspect the file after a Ctrl+C if needed
 
 ## Coding Conventions
 

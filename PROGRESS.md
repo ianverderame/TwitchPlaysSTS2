@@ -23,7 +23,7 @@ None
 - Bot and game run on same PC (localhost API)
 - All API URLs required via .env — no hardcoded defaults in committed files
 - Fail loud on missing config at startup
-- Terminal logging at INFO level only; no log files
+- Logging at INFO level to terminal + `logs/bot.log` (truncated each run, gitignored)
 - No automated tests for PoC
 - GitHub Issues for all task tracking; Claude can create/label/prioritize autonomously
 - `PROGRESS.md` stays capped at ~20-30 lines; full history lives in GitHub Issues

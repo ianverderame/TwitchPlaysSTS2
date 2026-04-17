@@ -16,7 +16,6 @@ class GameState:
     player_max_hp: int | None
     player_block: int | None = None       # player.block
     player_gold: int | None = None             # player.gold
-    player_potion_count: int = 0               # len(player.potions) — for shop potion availability
     player_energy: int | None = None      # player.energy (combat only)
     is_play_phase: bool | None = None          # battle.is_play_phase (combat only)
     battle_round: int | None = None            # battle.round — increments each full turn cycle
@@ -43,6 +42,7 @@ class GameState:
     hand_select_cards: list[dict] = field(default_factory=list)      # hand_select.cards (has name)
     card_select_cards: list[dict] = field(default_factory=list)      # card_select.cards (has name)
     shop_items: list[dict] = field(default_factory=list)             # shop.items or fake_merchant.shop.items
+    player_potions: list[dict] = field(default_factory=list)         # player.potions (slot, name, target_type, can_use_in_combat, description)
 
     @classmethod
     def from_api_response(cls, data: dict) -> "GameState":
@@ -77,7 +77,6 @@ class GameState:
             player_max_hp=player.get("max_hp"),
             player_block=player.get("block"),
             player_gold=player.get("gold"),
-            player_potion_count=len(player.get("potions") or []),
             player_energy=player.get("energy"),
             is_play_phase=battle.get("is_play_phase"),
             battle_round=battle.get("round"),
@@ -109,6 +108,7 @@ class GameState:
                 or (data.get("fake_merchant") or {}).get("shop", {}).get("items")
                 or []
             ),
+            player_potions=player.get("potions") or [],
         )
 
     def is_combat_state(self) -> bool:

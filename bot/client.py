@@ -12,8 +12,8 @@ from game.api_client import STS2Client
 from game.events import GameEndedEvent, GameEvent, GameStartedEvent, MenuSelectNeededEvent, VoteNeededEvent
 from game.menu_client import MenuClient
 from game.labels import MAP_ROOM_LABELS, labels_for_state, preamble_for_state, target_labels_for_enemies
-from game.options import options_for_state
-from game.state import GameState
+from game.options import options_for_state, parse_potion_winner, potion_display_name
+from game.state import GameState, IDLE_STATES
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +107,8 @@ class ChatComponent(commands.Component):
                 await self._handle_slot_lookup(arg)
             elif arg.lower() == "map":
                 await self._handle_map_preview()
+            elif arg.lower() in ("p", "potions"):
+                await self._handle_potions_list()
             return
 
         # ((name)) — card lookup, one response per match in the message
@@ -168,6 +170,32 @@ class ChatComponent(commands.Component):
             await self._send_chat(_format_card_message(card_data))
         else:
             await self._send_chat(f"{resolved_name} | {_wiki_url(resolved_name)}")
+
+    async def _handle_potions_list(self) -> None:
+        """Respond to ?p / ?potions with a one-line summary of held potions."""
+        raw_data = await self._game_client.get_state()
+        if not raw_data:
+            return
+
+        if raw_data.get("state_type") in IDLE_STATES:
+            await self._send_chat("No run in progress.")
+            return
+
+        potions: list[dict] = (raw_data.get("player") or {}).get("potions") or []
+        if not potions:
+            await self._send_chat("No potions in belt.")
+            return
+
+        entries = [(p.get("slot", 0) + 1, potion_display_name(p), p) for p in potions]
+        full_parts = [
+            f"{slot}: {name} | target={p.get('target_type') or 'None'} combat={p.get('can_use_in_combat')} | {p.get('description') or ''}"
+            for slot, name, p in entries
+        ]
+        message = " | ".join(full_parts)
+        if len(message) > 490:
+            # Drop target_type + description if the full listing overflows Twitch's 500-char limit
+            message = " | ".join(f"{slot}: {name}" for slot, name, _ in entries)
+        await self._send_chat(message)
 
     async def _handle_map_preview(self) -> None:
         """Respond to ?map with a text preview of upcoming map nodes."""
@@ -249,6 +277,7 @@ class TwitchBot(commands.Bot):
         self.vote_manager = VoteManager(config["vote"]["duration_seconds"])
         self._target_vote_duration: float = config["vote"]["target_duration_seconds"]
         self._smith_vote_duration: float = config["vote"].get("smith_vote_duration_seconds", 30.0)
+        self._auto_proceed_delay: float = config["game"].get("auto_proceed_delay_seconds", 3.0)
         self._ready = asyncio.Event()  # set in event_ready; gates _event_runner
 
         super().__init__(
@@ -279,8 +308,9 @@ class TwitchBot(commands.Bot):
         logger.info("Connected to Twitch as %s", self.user)
         users = await self.fetch_users(ids=[self._owner_id])
         broadcaster = users[0]
+        message = "[DRY RUN] Bot is online — votes run but actions are NOT sent to the game." if self._game_client.dry_run else "Bot is online!"
         await broadcaster.send_message(
-            message="Bot is online!",
+            message=message,
             sender=self.bot_id,
             token_for=self.bot_id,
         )
@@ -391,16 +421,23 @@ class TwitchBot(commands.Bot):
                                 )
                                 self._event_queue.task_done()
                                 continue
-                            # Auto-proceed: single is_proceed option — no vote needed
+                            # Auto-proceed: single unlocked event option — no meaningful vote to hold
                             if (
                                 pre_vote_state.state_type == "event"
                                 and len(pre_vote_state.event_options) == 1
-                                and pre_vote_state.event_options[0].get("is_proceed")
+                                and not pre_vote_state.event_options[0].get("is_locked")
                             ):
-                                proceed_index = pre_vote_state.event_options[0]["index"]
-                                body = {"action": "choose_event_option", "index": proceed_index}
+                                option = pre_vote_state.event_options[0]
+                                label = option.get("title") or "Proceed"
+                                await broadcaster.send_message(
+                                    message=f"One option available: {label}",
+                                    sender=self.bot_id,
+                                    token_for=self.bot_id,
+                                )
+                                await asyncio.sleep(self._auto_proceed_delay)
+                                body = {"action": "choose_event_option", "index": option["index"]}
                                 result = await self._game_client.post_action(body)
-                                logger.info("Auto-proceeding event (single proceed option) → %s", result)
+                                logger.info("Auto-proceeding event (single option '%s') → %s", label, result)
                                 self._event_queue.task_done()
                                 continue
                             # Auto-proceed: rest_site when can_proceed=True and no options remain
@@ -422,7 +459,12 @@ class TwitchBot(commands.Bot):
                                 pre_vote_state.state_type == "map"
                                 and len(pre_vote_state.map_next_options) == 1
                             ):
-                                await asyncio.sleep(5.0)
+                                await broadcaster.send_message(
+                                    message="One path available — proceeding",
+                                    sender=self.bot_id,
+                                    token_for=self.bot_id,
+                                )
+                                await asyncio.sleep(self._auto_proceed_delay)
                                 result = await self._game_client.post_action(
                                     {"action": "choose_map_node", "index": 0}
                                 )
@@ -434,7 +476,7 @@ class TwitchBot(commands.Bot):
                                 relic = pre_vote_state.treasure_relics[0]
                                 relic_name = relic.get("name") or "a relic"
                                 relic_index = relic["index"]
-                                await asyncio.sleep(3.0)
+                                await asyncio.sleep(self._auto_proceed_delay)
                                 result = await self._game_client.post_action(
                                     {"action": "claim_treasure_relic", "index": relic_index}
                                 )
@@ -470,16 +512,30 @@ class TwitchBot(commands.Bot):
                         preamble=preamble_for_state(vote_state),
                     )
 
-                    # AnyEnemy cards require a follow-up target vote when multiple enemies
-                    # are alive. resolved_target is passed through to build_api_body.
+                    # AnyEnemy cards/potions require a follow-up target vote when
+                    # multiple enemies are alive. resolved_target is passed through
+                    # to build_api_body.
                     resolved_target: str | None = None
                     if winner.isdigit() and event.state.is_combat_state():
                         card_index = int(winner) - 1
                         target_type = event.state.hand_card_target_types.get(card_index, "")
                         if target_type == "AnyEnemy":
+                            card_name = event.state.hand_card_names.get(card_index, f"Card {winner}")
                             resolved_target = await self._run_target_vote(
-                                broadcaster, winner, event.state
+                                broadcaster, card_name, event.state.enemies
                             )
+                    else:
+                        potion_action = parse_potion_winner(winner)
+                        if potion_action is not None and potion_action[0] == "use":
+                            slot = potion_action[1]
+                            potion = next(
+                                (p for p in event.state.player_potions if p.get("slot") == slot),
+                                None,
+                            )
+                            if potion and potion.get("target_type") == "AnyEnemy":
+                                resolved_target = await self._run_target_vote(
+                                    broadcaster, potion_display_name(potion), event.state.enemies
+                                )
 
                     # Re-fetch state so action uses fresh data (e.g. enemies list
                     # may be empty on the first monster poll that queued the vote).
@@ -538,8 +594,8 @@ class TwitchBot(commands.Bot):
                     else:
                         logger.info("Action executed: %s → %s", winner, result)
 
-                    # shop/fake_merchant: re-queue vote after successful purchase — player may want to buy more
-                    if action_state.state_type in ("shop", "fake_merchant") and body.get("action") == "shop_purchase" and result is not None:
+                    # shop/fake_merchant: re-queue vote after purchase or potion use
+                    if action_state.state_type in ("shop", "fake_merchant") and body.get("action") in ("shop_purchase", "use_potion") and result is not None:
                         post_shop_data = await self._game_client.get_state()
                         if post_shop_data:
                             try:
@@ -547,6 +603,17 @@ class TwitchBot(commands.Bot):
                                 if post_shop_state.state_type == action_state.state_type:
                                     logger.info("Shop purchase complete — re-queuing vote")
                                     self._event_queue.put_nowait(VoteNeededEvent(post_shop_state))
+                            except ValueError:
+                                pass
+
+                    # Any state: re-queue after discard so the vote reflects the updated belt
+                    if body.get("action") == "discard_potion" and result is not None:
+                        post_discard_data = await self._game_client.get_state()
+                        if post_discard_data:
+                            try:
+                                post_discard_state = GameState.from_api_response(post_discard_data)
+                                if post_discard_state.requires_player_input():
+                                    self._event_queue.put_nowait(VoteNeededEvent(post_discard_state))
                             except ValueError:
                                 pass
 
@@ -616,6 +683,18 @@ class TwitchBot(commands.Bot):
                             except ValueError:
                                 pass
 
+                    # Dry-run: game state never changes so the poller never fires a new event.
+                    # Re-queue manually so testing can continue without restarting the bot.
+                    if self._game_client.dry_run:
+                        dry_run_data = await self._game_client.get_state()
+                        if dry_run_data:
+                            try:
+                                dry_run_state = GameState.from_api_response(dry_run_data)
+                                if dry_run_state.requires_player_input():
+                                    self._event_queue.put_nowait(VoteNeededEvent(dry_run_state))
+                            except ValueError:
+                                pass
+
                 self._event_queue.task_done()
 
             except asyncio.CancelledError:
@@ -627,21 +706,18 @@ class TwitchBot(commands.Bot):
     async def _run_target_vote(
         self,
         broadcaster: twitchio.PartialUser,
-        card_winner: str,
-        event_state: GameState,
+        source_name: str,
+        enemies: list[dict],
     ) -> str | None:
-        """Run a follow-up target-selection vote for an AnyEnemy card.
+        """Run a follow-up target-selection vote for an AnyEnemy action.
 
         Returns the chosen entity_id, or None if the enemy list is empty
         (combat ended — the stale-vote guard downstream will handle it).
         Auto-targets when only one enemy is alive (no vote needed).
+        Used for both AnyEnemy cards and AnyEnemy potions.
         """
-        card_index = int(card_winner) - 1
-        card_name = event_state.hand_card_names.get(card_index, f"Card {card_winner}")
-        enemies = event_state.enemies
-
         if len(enemies) == 1:
-            logger.info("AnyEnemy card '%s' — single enemy, auto-targeting %s", card_name, enemies[0]["name"])
+            logger.info("AnyEnemy '%s' — single enemy, auto-targeting %s", source_name, enemies[0]["name"])
             return enemies[0]["entity_id"]
 
         if not enemies:
@@ -654,9 +730,9 @@ class TwitchBot(commands.Bot):
             broadcaster=broadcaster,
             bot_id=self.bot_id,
             options=target_options,
-            state_summary=f"target select for {card_name}",
+            state_summary=f"target select for {source_name}",
             labels=target_labels,
-            preamble=f"{card_name} \u2014 choose target:",
+            preamble=f"{source_name} \u2014 choose target:",
             duration=self._target_vote_duration,
         )
 
@@ -816,61 +892,39 @@ class TwitchBot(commands.Bot):
         )
 
     async def _handle_rewards(self) -> None:
-        """Auto-claim all non-card rewards, open card rewards for a chat vote, then proceed.
-
-        Claims one item per loop iteration and re-fetches state each time since
-        claiming shifts reward indices. Card/special_card/card_removal rewards are
-        opened last and return early — the resulting selection state is handled by
-        the polling loop as a separate VoteNeededEvent.
-        """
-        # Types that open a selection screen for chat to vote on
-        VOTE_TYPES = {"card", "special_card", "card_removal"}
+        """Auto-claim gold/relic/potion rewards, open card rewards for a chat vote, then proceed."""
+        _VOTE_TYPES = {"card", "special_card", "card_removal"}
 
         while True:
             fresh_data = await self._game_client.get_state()
             if not fresh_data:
                 logger.warning("Rewards: could not fetch fresh state — skipping")
                 return
-
             try:
                 state = GameState.from_api_response(fresh_data)
             except ValueError:
                 logger.warning("Rewards: malformed state response — skipping")
                 return
-
             if state.state_type != "rewards":
                 logger.info("Rewards: state moved to '%s' — done", state.state_type)
                 return
 
-            # Prefer non-vote items first; keep a card/selection item as fallback
-            auto_item = None
-            vote_item = None
-            for item in state.rewards_items:
-                item_type = item.get("type")
-                if item_type in VOTE_TYPES:
-                    if vote_item is None:
-                        vote_item = item
-                else:
-                    auto_item = item
-                    break  # claim one at a time, re-fetch after
+            auto_item = next((i for i in state.rewards_items if i.get("type") not in _VOTE_TYPES), None)
+            vote_item = next((i for i in state.rewards_items if i.get("type") in _VOTE_TYPES), None)
 
             if auto_item:
-                result = await self._game_client.post_action(
-                    {"action": "claim_reward", "index": auto_item["index"]}
-                )
+                await asyncio.sleep(self._auto_proceed_delay)
+                result = await self._game_client.post_action({"action": "claim_reward", "index": auto_item["index"]})
                 logger.info("Auto-claimed %s reward → %s", auto_item.get("type"), result)
-                continue  # re-fetch and process remaining items
+                continue
 
             if vote_item:
-                result = await self._game_client.post_action(
-                    {"action": "claim_reward", "index": vote_item["index"]}
-                )
-                logger.info(
-                    "Auto-opened %s reward for vote → %s", vote_item.get("type"), result
-                )
-                return  # polling loop handles the resulting selection state
+                await asyncio.sleep(self._auto_proceed_delay)
+                result = await self._game_client.post_action({"action": "claim_reward", "index": vote_item["index"]})
+                logger.info("Auto-opened %s reward for vote → %s", vote_item.get("type"), result)
+                return
 
-            # Nothing left to claim — proceed to map
+            await asyncio.sleep(self._auto_proceed_delay)
             result = await self._game_client.post_action({"action": "proceed"})
             logger.info("Auto-proceeded from rewards → %s", result)
             return
