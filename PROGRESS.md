@@ -4,10 +4,10 @@
 `PoC`
 
 ## Recently Completed
+- #47 — Silent stops: auto-proceed treasure/rest_site; shop re-queue + leave-only fallback; playable_card_indices change detection (relic card draw); diagnostic DEBUG logging; live-tested
 - #33 — Smith upgrade: deck-wide card vote; dedup identical copies (e.g. `Defend (x5)`); numbered `!N` voting; 30s window; green announcement header; select_card + confirm_selection flow; live-tested
 - #28 — Descriptive vote labels: `!N=Label` for all in-run states; `game/labels.py`; map left→right preamble; dynamic rest_site/map/shop options; shop shows name+price, filters unaffordable+full-belt potions
 - #34 — Multi-target card voting: AnyEnemy → follow-up target vote with `Name (hp/max_hphp)` labels; auto-target on single enemy; `hand_select` race condition fix; bot launch vote fix
-- #32 — Card lookup: `((name))` searches all piles → name+cost+description+wiki.gg link; `?N` looks up hand slot N; multi-card in one message; works at any game state; live-tested
 
 ## Active Issue
 None

@@ -79,11 +79,12 @@ def options_for_state(state: GameState) -> list[str]:
         sorted_nodes = sorted(state.map_next_options, key=lambda n: n["col"])
         return [str(i + 1) for i in range(len(sorted_nodes))]
 
-    if state.state_type in ("shop", "fake_merchant") and state.shop_items:
+    if state.state_type in ("shop", "fake_merchant"):
         # Only offer items that are stocked, affordable, and purchasable given current state
         available = [i for i in state.shop_items if _shop_item_available(i, state)]
         if available:
             return [str(i["index"] + 1) for i in available] + ["end"]
+        return ["end"]  # no purchasable items — only option is to leave
 
     if state.state_type == "event" and state.event_options:
         # Derive options from actual event options, skipping locked ones
