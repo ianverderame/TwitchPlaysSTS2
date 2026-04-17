@@ -15,6 +15,7 @@ class GameState:
     player_hp: int | None
     player_max_hp: int | None
     player_block: int | None = None       # player.block
+    player_gold: int | None = None             # player.gold
     player_potion_count: int = 0               # len(player.potions) — for shop potion availability
     player_energy: int | None = None      # player.energy (combat only)
     is_play_phase: bool | None = None          # battle.is_play_phase (combat only)
@@ -25,6 +26,7 @@ class GameState:
     crystal_sphere_cells: list[dict] = field(default_factory=list)  # crystal_sphere.clickable_cells
     event_options: list[dict] = field(default_factory=list)         # event.options (event state only)
     hand_select_card_count: int = 0                                  # len(hand_select.cards) (hand_select state only)
+    hand_select_can_confirm: bool = False                            # hand_select.can_confirm (hand_select state only)
     hand_select_prompt: str = ""                                     # hand_select.prompt (hand_select state only)
     rewards_items: list[dict] = field(default_factory=list)          # rewards.items (rewards state only)
     card_select_can_confirm: bool = False                             # card_select.can_confirm (card_select state only)
@@ -74,6 +76,7 @@ class GameState:
             player_hp=player.get("hp"),
             player_max_hp=player.get("max_hp"),
             player_block=player.get("block"),
+            player_gold=player.get("gold"),
             player_potion_count=len(player.get("potions") or []),
             player_energy=player.get("energy"),
             is_play_phase=battle.get("is_play_phase"),
@@ -86,6 +89,7 @@ class GameState:
             crystal_sphere_cells=crystal_sphere.get("clickable_cells") or [],
             event_options=event.get("options") or [],
             hand_select_card_count=len(hand_select.get("cards") or []),
+            hand_select_can_confirm=bool(hand_select.get("can_confirm")),
             hand_select_prompt=hand_select.get("prompt") or "",
             rewards_items=rewards.get("items") or [],
             card_select_can_confirm=bool(card_select.get("can_confirm")),

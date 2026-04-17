@@ -63,6 +63,13 @@ async def poll_game_state(
                     logger.info("STS2MCP API reconnected")
                     api_reachable = True
                 state = GameState.from_api_response(data)
+                if state.state_type not in {
+                    "menu", "monster", "elite", "boss", "map", "event", "rest_site",
+                    "shop", "fake_merchant", "card_reward", "rewards", "treasure",
+                    "hand_select", "card_select", "bundle_select", "relic_select",
+                    "crystal_sphere", "game_over", "unknown", "overlay",
+                }:
+                    logger.info("UNKNOWN STATE: type=%s keys=%s", state.state_type, list(data.keys()))
 
                 if previous_state is None:
                     # First successful poll — emit if input needed

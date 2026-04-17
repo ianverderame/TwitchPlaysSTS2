@@ -327,6 +327,24 @@ class TwitchBot(commands.Bot):
                 elif isinstance(event, VoteNeededEvent) and event.state.state_type == "rewards":
                     await self._handle_rewards()
 
+                elif isinstance(event, VoteNeededEvent) and event.state.card_select_screen_type == "select":
+                    # Shop card removal — grouped deck list, same deduplication as smith upgrade.
+                    remove_data = await self._game_client.get_state()
+                    if remove_data:
+                        try:
+                            remove_state = GameState.from_api_response(remove_data)
+                            if remove_state.card_select_screen_type == "select":
+                                await self._handle_card_remove(broadcaster, remove_state)
+                            else:
+                                logger.warning(
+                                    "Card remove: state moved to '%s' before vote started — discarding",
+                                    remove_state.state_type,
+                                )
+                        except ValueError:
+                            logger.warning("Card remove: could not parse fresh state — discarding")
+                    else:
+                        logger.warning("Card remove: could not fetch fresh state — discarding")
+
                 elif isinstance(event, VoteNeededEvent) and event.state.card_select_screen_type == "upgrade":
                     # Smith upgrade — special handling: full deck, deduplication, 30s vote.
                     # Re-fetch to get the latest card list (avoids acting on stale card data).
@@ -349,6 +367,7 @@ class TwitchBot(commands.Bot):
                 elif isinstance(event, VoteNeededEvent):
                     # Check 1: discard if the game has already moved on since this
                     # event was queued (common during rapid floor-0 transitions).
+                    pre_vote_state: GameState | None = None
                     pre_vote_data = await self._game_client.get_state()
                     if pre_vote_data:
                         try:
@@ -384,7 +403,7 @@ class TwitchBot(commands.Bot):
                                 logger.info("Auto-proceeding event (single proceed option) → %s", result)
                                 self._event_queue.task_done()
                                 continue
-                            # Auto-proceed: rest_site after choosing an option (e.g. after Resting)
+                            # Auto-proceed: rest_site when can_proceed=True and no options remain
                             if (
                                 pre_vote_state.state_type == "rest_site"
                                 and pre_vote_state.rest_site_can_proceed
@@ -398,17 +417,57 @@ class TwitchBot(commands.Bot):
                                 logger.info("Auto-proceeding rest_site → %s", result)
                                 self._event_queue.task_done()
                                 continue
+                            # Auto-select: single map node — no vote needed, short delay for readability
+                            if (
+                                pre_vote_state.state_type == "map"
+                                and len(pre_vote_state.map_next_options) == 1
+                            ):
+                                await asyncio.sleep(5.0)
+                                result = await self._game_client.post_action(
+                                    {"action": "choose_map_node", "index": 0}
+                                )
+                                logger.info("Auto-selected single map node → %s", result)
+                                self._event_queue.task_done()
+                                continue
+                            # Auto-claim: treasure always contains exactly one relic — no vote needed
+                            if pre_vote_state.state_type == "treasure" and pre_vote_state.treasure_relics:
+                                relic = pre_vote_state.treasure_relics[0]
+                                relic_name = relic.get("name") or "a relic"
+                                relic_index = relic["index"]
+                                await asyncio.sleep(3.0)
+                                result = await self._game_client.post_action(
+                                    {"action": "claim_treasure_relic", "index": relic_index}
+                                )
+                                logger.info("Auto-claimed treasure relic '%s' → %s", relic_name, result)
+                                await broadcaster.send_message(
+                                    message=f"Claimed {relic_name}!",
+                                    sender=self.bot_id,
+                                    token_for=self.bot_id,
+                                )
+                                proceed_result = await self._game_client.post_action({"action": "proceed"})
+                                logger.info("Auto-proceeded from treasure → %s", proceed_result)
+                                self._event_queue.task_done()
+                                continue
                         except ValueError:
                             pass  # Can't parse fresh state — proceed with the vote anyway
 
-                    options = options_for_state(event.state)
+                    # Auto-leave: shop with nothing purchasable — no vote needed
+                    if pre_vote_data and pre_vote_state and pre_vote_state.state_type in ("shop", "fake_merchant"):
+                        if options_for_state(pre_vote_state) == ["end"]:
+                            result = await self._game_client.post_action({"action": "proceed"})
+                            logger.info("Auto-left shop — nothing purchasable → %s", result)
+                            self._event_queue.task_done()
+                            continue
+
+                    vote_state = pre_vote_state if pre_vote_state is not None else event.state
+                    options = options_for_state(vote_state)
                     winner = await self.vote_manager.run_window(
                         broadcaster=broadcaster,
                         bot_id=self.bot_id,
                         options=options,
-                        state_summary=event.state.summary(),
-                        labels=labels_for_state(event.state) or None,
-                        preamble=preamble_for_state(event.state),
+                        state_summary=vote_state.summary(),
+                        labels=labels_for_state(vote_state) or None,
+                        preamble=preamble_for_state(vote_state),
                     )
 
                     # AnyEnemy cards require a follow-up target vote when multiple enemies
@@ -491,27 +550,55 @@ class TwitchBot(commands.Bot):
                             except ValueError:
                                 pass
 
-                    # rest_site: auto-proceed after choosing an option (Rest/Smith/etc.)
+                    # rest_site: after choosing an option, poll until can_proceed=True then decide
                     if action_state.state_type == "rest_site" and body.get("action") == "choose_rest_option":
-                        post_rest_data = await self._game_client.get_state()
-                        if post_rest_data:
+                        for _ in range(10):
+                            await asyncio.sleep(1.0)
+                            post_rest_data = await self._game_client.get_state()
+                            if not post_rest_data:
+                                break
                             try:
                                 post_rest_state = GameState.from_api_response(post_rest_data)
-                                if post_rest_state.state_type == "rest_site" and post_rest_state.rest_site_can_proceed:
+                            except ValueError:
+                                break
+                            if post_rest_state.state_type != "rest_site":
+                                logger.info("rest_site: state moved to '%s' — done", post_rest_state.state_type)
+                                break
+                            if post_rest_state.rest_site_can_proceed:
+                                enabled = [
+                                    o for o in post_rest_state.rest_site_options
+                                    if o.get("is_enabled", True) and not o.get("is_proceed")
+                                ]
+                                if enabled:
+                                    # Miniature Tent: more options still available — re-queue vote
+                                    logger.info("rest_site: can_proceed but options remain — re-queuing vote")
+                                    self._event_queue.put_nowait(VoteNeededEvent(post_rest_state))
+                                else:
                                     proceed_result = await self._game_client.post_action({"action": "proceed"})
                                     logger.info("Auto-proceeded after rest_site option → %s", proceed_result)
-                            except ValueError:
-                                pass
+                                break
+                        else:
+                            logger.warning("rest_site: can_proceed never became True after 10s — may be stuck")
 
-                    # treasure: auto-proceed after relic claim — game stays in treasure state
-                    elif action_state.state_type == "treasure" and body.get("action") == "claim_treasure_relic":
-                        proceed_result = await self._game_client.post_action({"action": "proceed"})
-                        logger.info("Auto-proceeded after treasure relic claim → %s", proceed_result)
-
-                    # hand_select: auto-confirm after card selection — no second vote needed
+                    # hand_select: confirm when can_confirm=True, re-queue if more selections needed
                     elif action_state.state_type == "hand_select" and body.get("action") == "combat_select_card":
-                        confirm_result = await self._game_client.post_action({"action": "combat_confirm_selection"})
-                        logger.info("Auto-confirmed hand_select → %s", confirm_result)
+                        post_hs_data = await self._game_client.get_state()
+                        if post_hs_data:
+                            try:
+                                post_hs_state = GameState.from_api_response(post_hs_data)
+                                if post_hs_state.state_type == "hand_select":
+                                    if post_hs_state.hand_select_can_confirm:
+                                        confirm_result = await self._game_client.post_action({"action": "combat_confirm_selection"})
+                                        logger.info("Auto-confirmed hand_select → %s", confirm_result)
+                                    else:
+                                        logger.info("hand_select: more selections needed — re-queuing vote")
+                                        self._event_queue.put_nowait(VoteNeededEvent(post_hs_state))
+                            except ValueError:
+                                confirm_result = await self._game_client.post_action({"action": "combat_confirm_selection"})
+                                logger.info("Auto-confirmed hand_select (state parse failed) → %s", confirm_result)
+                        else:
+                            confirm_result = await self._game_client.post_action({"action": "combat_confirm_selection"})
+                            logger.info("Auto-confirmed hand_select (no fresh state) → %s", confirm_result)
 
                     # card_select: re-queue if more selections needed, auto-confirm when ready
                     elif action_state.state_type == "card_select" and body.get("action") == "select_card":
@@ -600,127 +687,133 @@ class TwitchBot(commands.Bot):
 
         return None  # combat ended; stale-vote guard handles it
 
-    async def _handle_smith_upgrade(
+    @staticmethod
+    def _dedup_cards(cards: list[dict]) -> list[tuple[str, int]]:
+        """Return deduplicated (display_label, api_index) pairs from a card list.
+
+        Cards identical in all fields except 'index' are merged; the first card's
+        index is used. Merged entries are labelled 'Name (xN)'.
+        """
+        def key(card: dict) -> tuple:
+            return tuple(sorted((k, str(v)) for k, v in card.items() if k != "index"))
+
+        counts: dict[tuple, int] = {}
+        for card in cards:
+            k = key(card)
+            counts[k] = counts.get(k, 0) + 1
+
+        seen: set[tuple] = set()
+        groups: list[tuple[str, int]] = []
+        for card in cards:
+            k = key(card)
+            if k not in seen:
+                seen.add(k)
+                name = card.get("name") or f"Card {card.get('index', '?')}"
+                label = f"{name} (x{counts[k]})" if counts[k] > 1 else name
+                groups.append((label, card["index"]))
+        return groups
+
+    async def _handle_deck_select_vote(
         self,
         broadcaster: twitchio.PartialUser,
         state: GameState,
+        *,
+        header: str,
+        color: str,
+        state_summary: str,
+        duration: float,
     ) -> None:
-        """Handle a smith upgrade card-selection vote.
+        """Run a deduplicated card-selection vote for any card_select overlay.
 
-        Fetches the full deck from card_select.cards, deduplicates cards that are
-        absolutely identical (same name, upgrade status, and all other attributes),
-        posts a numbered card list to chat, sends a highlighted announcement as the
-        visual anchor, runs a 30s vote, then submits the winning card to the API.
-
-        Deduplication: two cards are merged when every field except 'index' is equal.
-        The first card's API index is used for the winning vote option. Merged entries
-        are labelled "Name(xN)" so viewers know multiple copies exist.
+        Covers: announce header → numbered card list → silent vote → select_card
+        → confirm_selection. Used by smith upgrade, shop card removal, and any
+        future card_select screen_type that follows the same pattern.
         """
         cards = state.card_select_cards
         if not cards:
-            logger.warning("Smith upgrade: card_select.cards is empty — skipping")
+            logger.warning("Deck select (%s): card_select.cards is empty — skipping", state_summary)
             return
 
-        # --- Deduplication ---
-        # Key = all card fields except 'index', sorted for stability
-        def _card_key(card: dict) -> tuple:
-            return tuple(sorted((k, str(v)) for k, v in card.items() if k != "index"))
-
-        key_counts: dict[tuple, int] = {}
-        for card in cards:
-            k = _card_key(card)
-            key_counts[k] = key_counts.get(k, 0) + 1
-
-        seen: set[tuple] = set()
-        # groups: ordered list of (display_label, api_index)
-        groups: list[tuple[str, int]] = []
-        for card in cards:
-            k = _card_key(card)
-            if k not in seen:
-                seen.add(k)
-                name: str = card.get("name") or f"Card {card.get('index', '?')}"
-                count = key_counts[k]
-                label = f"{name} (x{count})" if count > 1 else name
-                groups.append((label, card["index"]))
-
+        groups = self._dedup_cards(cards)
         options = [str(i + 1) for i in range(len(groups))]
-        option_to_api_index: dict[str, int] = {str(i + 1): groups[i][1] for i in range(len(groups))}
-        labels: dict[str, str] = {str(i + 1): groups[i][0] for i in range(len(groups))}
+        option_to_api_index = {str(i + 1): groups[i][1] for i in range(len(groups))}
+        labels = {str(i + 1): groups[i][0] for i in range(len(groups))}
 
-        duration = self._smith_vote_duration
-        header = f"SMITH UPGRADE ({duration:.0f}s) — Pick a card to upgrade! Type !N for your choice:"
-
-        # --- Announce header (highlighted, visually distinct) ---
-        # Falls back to a regular chat message if the bot's token lacks the
-        # moderator:manage:announcements scope (or any other announcement error).
         try:
-            await broadcaster.send_announcement(
-                moderator=self.bot_id,
-                message=header,
-                color="green",
-            )
+            await broadcaster.send_announcement(moderator=self.bot_id, message=header, color=color)
         except twitchio.HTTPException as exc:
             logger.warning(
-                "Smith upgrade: send_announcement failed (%s) — falling back to regular message. "
-                "Grant the bot the 'moderator:manage:announcements' scope for highlighted announcements.",
-                exc,
+                "Deck select (%s): send_announcement failed (%s) — falling back to chat message. "
+                "Grant the bot 'moderator:manage:announcements' for highlighted announcements.",
+                state_summary, exc,
             )
-            await broadcaster.send_message(
-                message=header,
-                sender=self.bot_id,
-                token_for=self.bot_id,
-            )
+            await broadcaster.send_message(message=header, sender=self.bot_id, token_for=self.bot_id)
 
-        # --- Post numbered card list in ≤490-char chunks ---
         entries = [f"{i + 1}. {groups[i][0]}" for i in range(len(groups))]
         for chunk in _chunk_card_list(entries, separator=" | "):
             await broadcaster.send_message(
-                message=" | ".join(chunk),
-                sender=self.bot_id,
-                token_for=self.bot_id,
+                message=" | ".join(chunk), sender=self.bot_id, token_for=self.bot_id
             )
 
-        # --- Run vote (silent: announcement already sent above) ---
         winner = await self.vote_manager.run_window(
             broadcaster=broadcaster,
             bot_id=self.bot_id,
             options=options,
-            state_summary="smith upgrade",
+            state_summary=state_summary,
             labels=labels,
             duration=duration,
             silent=True,
         )
 
-        # --- Submit selected card to the API ---
         api_index = option_to_api_index[winner]
         winner_label = groups[int(winner) - 1][0]
         result = await self._game_client.post_action({"action": "select_card", "index": api_index})
-        logger.info(
-            "Smith upgrade: selected '%s' (api_index=%d, vote=%s) → %s",
-            winner_label, api_index, winner, result,
+        logger.info("Deck select (%s): '%s' (api_index=%d) → %s", state_summary, winner_label, api_index, result)
+
+        post_data = await self._game_client.get_state()
+        if post_data:
+            try:
+                post_state = GameState.from_api_response(post_data)
+            except ValueError:
+                post_state = None
+            if post_state is not None and post_state.state_type == "card_select":
+                if post_state.card_select_can_confirm:
+                    confirm_result = await self._game_client.post_action({"action": "confirm_selection"})
+                    logger.info("Deck select (%s): confirmed → %s", state_summary, confirm_result)
+                else:
+                    logger.warning(
+                        "Deck select (%s): still in card_select but can_confirm=False — "
+                        "selection may not be committed",
+                        state_summary,
+                    )
+
+    async def _handle_card_remove(
+        self,
+        broadcaster: twitchio.PartialUser,
+        state: GameState,
+    ) -> None:
+        duration = self._smith_vote_duration
+        await self._handle_deck_select_vote(
+            broadcaster, state,
+            header=f"REMOVE A CARD ({duration:.0f}s) — Pick a card to remove! Type !N for your choice:",
+            color="red",
+            state_summary="card remove",
+            duration=duration,
         )
 
-        # --- Confirm the selection (select_card only toggles; confirm commits) ---
-        # Smith upgrades exactly one card, so can_confirm should be True after the
-        # toggle. Re-fetch fresh state in case the game closed the overlay already.
-        post_select_data = await self._game_client.get_state()
-        if post_select_data:
-            try:
-                post_select_state = GameState.from_api_response(post_select_data)
-            except ValueError:
-                post_select_state = None
-            if (
-                post_select_state is not None
-                and post_select_state.state_type == "card_select"
-                and post_select_state.card_select_can_confirm
-            ):
-                confirm_result = await self._game_client.post_action({"action": "confirm_selection"})
-                logger.info("Smith upgrade: confirmed → %s", confirm_result)
-            elif post_select_state is not None and post_select_state.state_type == "card_select":
-                logger.warning(
-                    "Smith upgrade: still in card_select but can_confirm=False — "
-                    "upgrade may not be committed"
-                )
+    async def _handle_smith_upgrade(
+        self,
+        broadcaster: twitchio.PartialUser,
+        state: GameState,
+    ) -> None:
+        duration = self._smith_vote_duration
+        await self._handle_deck_select_vote(
+            broadcaster, state,
+            header=f"SMITH UPGRADE ({duration:.0f}s) — Pick a card to upgrade! Type !N for your choice:",
+            color="green",
+            state_summary="smith upgrade",
+            duration=duration,
+        )
 
     async def _handle_rewards(self) -> None:
         """Auto-claim all non-card rewards, open card rewards for a chat vote, then proceed.
