@@ -4,20 +4,19 @@
 `PoC`
 
 ## Recently Completed
-- Backlog cleanup + senior code review — consolidated #12/#13 into #14, merged #40 into #29, expanded #36 scope; opened #58 (refactor _event_runner), #59 (timings → settings.yaml), #60 (chat-send DRY), #61 (minor cleanups)
+- #58 — Refactor _event_runner (379 lines) into 9 focused methods; _event_runner now 45 lines; fixed polling bug for draw-on-play cards (Pommel Strike etc.)
+- Backlog cleanup + senior code review — consolidated #12/#13 into #14, merged #40 into #29, expanded #36 scope; opened #58–#61
 - #56 — !help command (any time, not vote-gated) + README (setup, .env, mods, commands cheat sheet); live-tested
 - #51 — Potions: use/discard voting (!pN/!dN), belt filter in shop, AnyEnemy target vote, ?potions/?p command, dry-run mode, file logging, auto_proceed_delay config; live-tested
-- #38 (partial) — hand_select multi-select (can_confirm); treasure auto-claim + 3s pause; shop gold preamble, auto-leave, Remove Card grouped vote; rest site auto-proceed retry loop; Ancient relic vote (event state); single map node auto-select (5s); all 8 map node types confirmed
-- #31 — ?map command: text preview of upcoming map nodes (up to 8 floors); `?` info command convention; self-message guard; live-tested
 
 ## Active Issue
 None
 
 ## Up Next
-1. #58 — Refactor _event_runner into focused handlers
-2. #59 — Move hardcoded timings/retries to settings.yaml
-3. #60 — Chat-send DRY + broadcaster caching
-4. #53 — Full belt + potion reward: discard-to-claim flow
+1. #59 — Move hardcoded timings/retries to settings.yaml
+2. #60 — Chat-send DRY + broadcaster caching
+3. #53 — Full belt + potion reward: discard-to-claim flow
+4. #63 — End-game screen navigation (victory, defeat, unlocks)
 5. #7 — Database Logging
 6. #61 — Bundled minor code-hygiene cleanups
 

@@ -134,6 +134,10 @@ async def poll_game_state(
                             set(state.playable_card_indices) != set(previous_state.playable_card_indices)
                         ) or (
                             len(state.player_potions) < len(previous_state.player_potions)
+                        ) or (
+                            state.player_energy is not None
+                            and previous_state.player_energy is not None
+                            and state.player_energy < previous_state.player_energy
                         ):
                             # Card was played mid-turn, playable cards changed (e.g. relic drew
                             # a card), or a potion was consumed. Poll briefly before re-queuing —

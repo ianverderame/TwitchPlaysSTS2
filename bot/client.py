@@ -354,7 +354,6 @@ class TwitchBot(commands.Bot):
                         sender=self.bot_id,
                         token_for=self.bot_id,
                     )
-
                 elif isinstance(event, GameEndedEvent):
                     logger.info("Game ended: %s", event.state.summary())
                     await broadcaster.send_message(
@@ -362,358 +361,333 @@ class TwitchBot(commands.Bot):
                         sender=self.bot_id,
                         token_for=self.bot_id,
                     )
-
                 elif isinstance(event, MenuSelectNeededEvent):
                     await self._handle_menu_select(broadcaster)
-
                 elif isinstance(event, VoteNeededEvent) and event.state.state_type == "rewards":
                     await self._handle_rewards()
-
                 elif isinstance(event, VoteNeededEvent) and event.state.card_select_screen_type == "select":
-                    # Shop card removal — grouped deck list, same deduplication as smith upgrade.
-                    remove_data = await self._game_client.get_state()
-                    if remove_data:
-                        try:
-                            remove_state = GameState.from_api_response(remove_data)
-                            if remove_state.card_select_screen_type == "select":
-                                await self._handle_card_remove(broadcaster, remove_state)
-                            else:
-                                logger.warning(
-                                    "Card remove: state moved to '%s' before vote started — discarding",
-                                    remove_state.state_type,
-                                )
-                        except ValueError:
-                            logger.warning("Card remove: could not parse fresh state — discarding")
-                    else:
-                        logger.warning("Card remove: could not fetch fresh state — discarding")
-
+                    await self._handle_card_remove_event(event, broadcaster)
                 elif isinstance(event, VoteNeededEvent) and event.state.card_select_screen_type == "upgrade":
-                    # Smith upgrade — special handling: full deck, deduplication, 30s vote.
-                    # Re-fetch to get the latest card list (avoids acting on stale card data).
-                    smith_data = await self._game_client.get_state()
-                    if smith_data:
-                        try:
-                            smith_state = GameState.from_api_response(smith_data)
-                            if smith_state.card_select_screen_type == "upgrade":
-                                await self._handle_smith_upgrade(broadcaster, smith_state)
-                            else:
-                                logger.warning(
-                                    "Smith upgrade: state moved to '%s' before vote started — discarding",
-                                    smith_state.state_type,
-                                )
-                        except ValueError:
-                            logger.warning("Smith upgrade: could not parse fresh state — discarding")
-                    else:
-                        logger.warning("Smith upgrade: could not fetch fresh state — discarding")
-
+                    await self._handle_smith_upgrade_event(event, broadcaster)
                 elif isinstance(event, VoteNeededEvent):
-                    # Check 1: discard if the game has already moved on since this
-                    # event was queued (common during rapid floor-0 transitions).
-                    pre_vote_state: GameState | None = None
-                    pre_vote_data = await self._game_client.get_state()
-                    if pre_vote_data:
-                        try:
-                            pre_vote_state = GameState.from_api_response(pre_vote_data)
-                            if pre_vote_state.state_type != event.state.state_type:
-                                logger.warning(
-                                    "Discarding stale vote: queued for '%s' but game is now '%s'",
-                                    event.state.state_type,
-                                    pre_vote_state.state_type,
-                                )
-                                self._event_queue.task_done()
-                                continue
-                            # For combat states, also discard if it's now the enemy's turn
-                            if (
-                                pre_vote_state.is_combat_state()
-                                and pre_vote_state.is_play_phase is False
-                            ):
-                                logger.warning(
-                                    "Discarding stale vote: combat state '%s' but is_play_phase=False (enemy turn)",
-                                    event.state.state_type,
-                                )
-                                self._event_queue.task_done()
-                                continue
-                            # Auto-proceed: single unlocked event option — no meaningful vote to hold
-                            if (
-                                pre_vote_state.state_type == "event"
-                                and len(pre_vote_state.event_options) == 1
-                                and not pre_vote_state.event_options[0].get("is_locked")
-                            ):
-                                option = pre_vote_state.event_options[0]
-                                label = option.get("title") or "Proceed"
-                                await broadcaster.send_message(
-                                    message=f"One option available: {label}",
-                                    sender=self.bot_id,
-                                    token_for=self.bot_id,
-                                )
-                                await asyncio.sleep(self._auto_proceed_delay)
-                                body = {"action": "choose_event_option", "index": option["index"]}
-                                result = await self._game_client.post_action(body)
-                                logger.info("Auto-proceeding event (single option '%s') → %s", label, result)
-                                self._event_queue.task_done()
-                                continue
-                            # Auto-proceed: rest_site when can_proceed=True and no options remain
-                            if (
-                                pre_vote_state.state_type == "rest_site"
-                                and pre_vote_state.rest_site_can_proceed
-                                and not any(
-                                    o.get("is_enabled", True)
-                                    for o in pre_vote_state.rest_site_options
-                                    if not o.get("is_proceed")
-                                )
-                            ):
-                                result = await self._game_client.post_action({"action": "proceed"})
-                                logger.info("Auto-proceeding rest_site → %s", result)
-                                self._event_queue.task_done()
-                                continue
-                            # Auto-select: single map node — no vote needed, short delay for readability
-                            if (
-                                pre_vote_state.state_type == "map"
-                                and len(pre_vote_state.map_next_options) == 1
-                            ):
-                                await broadcaster.send_message(
-                                    message="One path available — proceeding",
-                                    sender=self.bot_id,
-                                    token_for=self.bot_id,
-                                )
-                                await asyncio.sleep(self._auto_proceed_delay)
-                                result = await self._game_client.post_action(
-                                    {"action": "choose_map_node", "index": 0}
-                                )
-                                logger.info("Auto-selected single map node → %s", result)
-                                self._event_queue.task_done()
-                                continue
-                            # Auto-claim: treasure always contains exactly one relic — no vote needed
-                            if pre_vote_state.state_type == "treasure" and pre_vote_state.treasure_relics:
-                                relic = pre_vote_state.treasure_relics[0]
-                                relic_name = relic.get("name") or "a relic"
-                                relic_index = relic["index"]
-                                await asyncio.sleep(self._auto_proceed_delay)
-                                result = await self._game_client.post_action(
-                                    {"action": "claim_treasure_relic", "index": relic_index}
-                                )
-                                logger.info("Auto-claimed treasure relic '%s' → %s", relic_name, result)
-                                await broadcaster.send_message(
-                                    message=f"Claimed {relic_name}!",
-                                    sender=self.bot_id,
-                                    token_for=self.bot_id,
-                                )
-                                proceed_result = await self._game_client.post_action({"action": "proceed"})
-                                logger.info("Auto-proceeded from treasure → %s", proceed_result)
-                                self._event_queue.task_done()
-                                continue
-                        except ValueError:
-                            pass  # Can't parse fresh state — proceed with the vote anyway
-
-                    # Auto-leave: shop with nothing purchasable — no vote needed
-                    if pre_vote_data and pre_vote_state and pre_vote_state.state_type in ("shop", "fake_merchant"):
-                        if options_for_state(pre_vote_state) == ["end"]:
-                            result = await self._game_client.post_action({"action": "proceed"})
-                            logger.info("Auto-left shop — nothing purchasable → %s", result)
-                            self._event_queue.task_done()
-                            continue
-
-                    vote_state = pre_vote_state if pre_vote_state is not None else event.state
-                    options = options_for_state(vote_state)
-                    winner = await self.vote_manager.run_window(
-                        broadcaster=broadcaster,
-                        bot_id=self.bot_id,
-                        options=options,
-                        state_summary=vote_state.summary(),
-                        labels=labels_for_state(vote_state) or None,
-                        preamble=preamble_for_state(vote_state),
-                    )
-
-                    # AnyEnemy cards/potions require a follow-up target vote when
-                    # multiple enemies are alive. resolved_target is passed through
-                    # to build_api_body.
-                    resolved_target: str | None = None
-                    if winner.isdigit() and event.state.is_combat_state():
-                        card_index = int(winner) - 1
-                        target_type = event.state.hand_card_target_types.get(card_index, "")
-                        if target_type == "AnyEnemy":
-                            card_name = event.state.hand_card_names.get(card_index, f"Card {winner}")
-                            resolved_target = await self._run_target_vote(
-                                broadcaster, card_name, event.state.enemies
-                            )
-                    else:
-                        potion_action = parse_potion_winner(winner)
-                        if potion_action is not None and potion_action[0] == "use":
-                            slot = potion_action[1]
-                            potion = next(
-                                (p for p in event.state.player_potions if p.get("slot") == slot),
-                                None,
-                            )
-                            if potion and potion.get("target_type") == "AnyEnemy":
-                                resolved_target = await self._run_target_vote(
-                                    broadcaster, potion_display_name(potion), event.state.enemies
-                                )
-
-                    # Re-fetch state so action uses fresh data (e.g. enemies list
-                    # may be empty on the first monster poll that queued the vote).
-                    fresh_data = await self._game_client.get_state()
-                    if fresh_data:
-                        try:
-                            action_state = GameState.from_api_response(fresh_data)
-                        except ValueError:
-                            action_state = event.state
-                    else:
-                        action_state = event.state
-
-                    # Check 2: discard if the game moved on while the vote window
-                    # was open (e.g. state changed during the vote duration).
-                    if action_state.state_type != event.state.state_type:
-                        logger.warning(
-                            "Discarding stale vote result: queued for '%s' but game is now '%s'",
-                            event.state.state_type,
-                            action_state.state_type,
-                        )
-                        self._event_queue.task_done()
-                        continue
-                    if (
-                        action_state.is_combat_state()
-                        and action_state.is_play_phase is False
-                    ):
-                        logger.warning(
-                            "Discarding stale vote result: combat state '%s' but is_play_phase=False (enemy turn)",
-                            action_state.state_type,
-                        )
-                        self._event_queue.task_done()
-                        continue
-
-                    try:
-                        body = build_api_body(action_state, winner, target_entity_id=resolved_target)
-                    except ValueError:
-                        logger.error(
-                            "No API mapping for state=%s winner=%s — skipping action",
-                            event.state.state_type,
-                            winner,
-                        )
-                        self._event_queue.task_done()
-                        continue
-
-                    result = await self._game_client.post_action(body)
-                    if result is None:
-                        logger.warning("Action POST failed, retrying once...")
-                        result = await self._game_client.post_action(body)
-                        if result is None:
-                            logger.error(
-                                "Action POST failed twice for body=%s — system may be stuck",
-                                body,
-                            )
-                        else:
-                            logger.info("Action executed (retry): %s → %s", winner, result)
-                    else:
-                        logger.info("Action executed: %s → %s", winner, result)
-
-                    # shop/fake_merchant: re-queue vote after purchase or potion use
-                    if action_state.state_type in ("shop", "fake_merchant") and body.get("action") in ("shop_purchase", "use_potion") and result is not None:
-                        post_shop_data = await self._game_client.get_state()
-                        if post_shop_data:
-                            try:
-                                post_shop_state = GameState.from_api_response(post_shop_data)
-                                if post_shop_state.state_type == action_state.state_type:
-                                    logger.info("Shop purchase complete — re-queuing vote")
-                                    self._event_queue.put_nowait(VoteNeededEvent(post_shop_state))
-                            except ValueError:
-                                pass
-
-                    # Any state: re-queue after discard so the vote reflects the updated belt
-                    if body.get("action") == "discard_potion" and result is not None:
-                        post_discard_data = await self._game_client.get_state()
-                        if post_discard_data:
-                            try:
-                                post_discard_state = GameState.from_api_response(post_discard_data)
-                                if post_discard_state.requires_player_input():
-                                    self._event_queue.put_nowait(VoteNeededEvent(post_discard_state))
-                            except ValueError:
-                                pass
-
-                    # rest_site: after choosing an option, poll until can_proceed=True then decide
-                    if action_state.state_type == "rest_site" and body.get("action") == "choose_rest_option":
-                        for _ in range(10):
-                            await asyncio.sleep(1.0)
-                            post_rest_data = await self._game_client.get_state()
-                            if not post_rest_data:
-                                break
-                            try:
-                                post_rest_state = GameState.from_api_response(post_rest_data)
-                            except ValueError:
-                                break
-                            if post_rest_state.state_type != "rest_site":
-                                logger.info("rest_site: state moved to '%s' — done", post_rest_state.state_type)
-                                break
-                            if post_rest_state.rest_site_can_proceed:
-                                enabled = [
-                                    o for o in post_rest_state.rest_site_options
-                                    if o.get("is_enabled", True) and not o.get("is_proceed")
-                                ]
-                                if enabled:
-                                    # Miniature Tent: more options still available — re-queue vote
-                                    logger.info("rest_site: can_proceed but options remain — re-queuing vote")
-                                    self._event_queue.put_nowait(VoteNeededEvent(post_rest_state))
-                                else:
-                                    proceed_result = await self._game_client.post_action({"action": "proceed"})
-                                    logger.info("Auto-proceeded after rest_site option → %s", proceed_result)
-                                break
-                        else:
-                            logger.warning("rest_site: can_proceed never became True after 10s — may be stuck")
-
-                    # hand_select: confirm when can_confirm=True, re-queue if more selections needed
-                    elif action_state.state_type == "hand_select" and body.get("action") == "combat_select_card":
-                        post_hs_data = await self._game_client.get_state()
-                        if post_hs_data:
-                            try:
-                                post_hs_state = GameState.from_api_response(post_hs_data)
-                                if post_hs_state.state_type == "hand_select":
-                                    if post_hs_state.hand_select_can_confirm:
-                                        confirm_result = await self._game_client.post_action({"action": "combat_confirm_selection"})
-                                        logger.info("Auto-confirmed hand_select → %s", confirm_result)
-                                    else:
-                                        logger.info("hand_select: more selections needed — re-queuing vote")
-                                        self._event_queue.put_nowait(VoteNeededEvent(post_hs_state))
-                            except ValueError:
-                                confirm_result = await self._game_client.post_action({"action": "combat_confirm_selection"})
-                                logger.info("Auto-confirmed hand_select (state parse failed) → %s", confirm_result)
-                        else:
-                            confirm_result = await self._game_client.post_action({"action": "combat_confirm_selection"})
-                            logger.info("Auto-confirmed hand_select (no fresh state) → %s", confirm_result)
-
-                    # card_select: re-queue if more selections needed, auto-confirm when ready
-                    elif action_state.state_type == "card_select" and body.get("action") == "select_card":
-                        fresh_data = await self._game_client.get_state()
-                        if fresh_data:
-                            try:
-                                post_select_state = GameState.from_api_response(fresh_data)
-                                if post_select_state.state_type == "card_select":
-                                    if post_select_state.card_select_can_confirm:
-                                        confirm_result = await self._game_client.post_action({"action": "confirm_selection"})
-                                        logger.info("Auto-confirmed card_select → %s", confirm_result)
-                                    else:
-                                        logger.info("card_select: more selections needed — re-queuing vote")
-                                        self._event_queue.put_nowait(VoteNeededEvent(post_select_state))
-                            except ValueError:
-                                pass
-
-                    # Dry-run: game state never changes so the poller never fires a new event.
-                    # Re-queue manually so testing can continue without restarting the bot.
-                    if self._game_client.dry_run:
-                        dry_run_data = await self._game_client.get_state()
-                        if dry_run_data:
-                            try:
-                                dry_run_state = GameState.from_api_response(dry_run_data)
-                                if dry_run_state.requires_player_input():
-                                    self._event_queue.put_nowait(VoteNeededEvent(dry_run_state))
-                            except ValueError:
-                                pass
-
-                self._event_queue.task_done()
+                    await self._handle_vote_needed(event, broadcaster)
 
             except asyncio.CancelledError:
                 logger.info("Event runner cancelled")
                 raise
             except Exception:
                 logger.error("Unexpected error in event runner", exc_info=True)
+            finally:
+                self._event_queue.task_done()
+
+    async def _fetch_parsed_state(self) -> GameState | None:
+        """Fetch and parse current game state; return None on any failure."""
+        data = await self._game_client.get_state()
+        if not data:
+            return None
+        try:
+            return GameState.from_api_response(data)
+        except ValueError:
+            return None
+
+    def _is_stale_state(self, current: GameState, expected_type: str, context: str = "vote") -> bool:
+        """Return True (and warn) if current state no longer matches expected_type.
+
+        Covers both state_type mismatch and combat enemy-turn checks, eliminating
+        the duplicate pre-vote / post-vote guard blocks that previously existed.
+        """
+        if current.state_type != expected_type:
+            logger.warning(
+                "Discarding stale %s: queued for '%s' but game is now '%s'",
+                context,
+                expected_type,
+                current.state_type,
+            )
+            return True
+        if current.is_combat_state() and current.is_play_phase is False:
+            logger.warning(
+                "Discarding stale %s: combat state '%s' but is_play_phase=False (enemy turn)",
+                context,
+                expected_type,
+            )
+            return True
+        return False
+
+    async def _try_auto_proceed(self, state: GameState, broadcaster: twitchio.PartialUser) -> bool:
+        """Try the 5 single-option auto-proceed shortcuts; return True if handled."""
+        # Single unlocked event option — no meaningful vote to hold
+        if (
+            state.state_type == "event"
+            and len(state.event_options) == 1
+            and not state.event_options[0].get("is_locked")
+        ):
+            option = state.event_options[0]
+            label = option.get("title") or "Proceed"
+            await broadcaster.send_message(
+                message=f"One option available: {label}",
+                sender=self.bot_id,
+                token_for=self.bot_id,
+            )
+            await asyncio.sleep(self._auto_proceed_delay)
+            result = await self._game_client.post_action({"action": "choose_event_option", "index": option["index"]})
+            logger.info("Auto-proceeding event (single option '%s') → %s", label, result)
+            return True
+
+        # rest_site when can_proceed=True and no options remain
+        if (
+            state.state_type == "rest_site"
+            and state.rest_site_can_proceed
+            and not any(
+                o.get("is_enabled", True)
+                for o in state.rest_site_options
+                if not o.get("is_proceed")
+            )
+        ):
+            result = await self._game_client.post_action({"action": "proceed"})
+            logger.info("Auto-proceeding rest_site → %s", result)
+            return True
+
+        # Single map node — no vote needed, short delay for readability
+        if state.state_type == "map" and len(state.map_next_options) == 1:
+            await broadcaster.send_message(
+                message="One path available — proceeding",
+                sender=self.bot_id,
+                token_for=self.bot_id,
+            )
+            await asyncio.sleep(self._auto_proceed_delay)
+            result = await self._game_client.post_action({"action": "choose_map_node", "index": 0})
+            logger.info("Auto-selected single map node → %s", result)
+            return True
+
+        # Treasure always contains exactly one relic — no vote needed
+        if state.state_type == "treasure" and state.treasure_relics:
+            relic = state.treasure_relics[0]
+            relic_name = relic.get("name") or "a relic"
+            await asyncio.sleep(self._auto_proceed_delay)
+            result = await self._game_client.post_action({"action": "claim_treasure_relic", "index": relic["index"]})
+            logger.info("Auto-claimed treasure relic '%s' → %s", relic_name, result)
+            await broadcaster.send_message(
+                message=f"Claimed {relic_name}!",
+                sender=self.bot_id,
+                token_for=self.bot_id,
+            )
+            proceed_result = await self._game_client.post_action({"action": "proceed"})
+            logger.info("Auto-proceeded from treasure → %s", proceed_result)
+            return True
+
+        # Shop/fake_merchant with nothing purchasable — no vote needed
+        if state.state_type in ("shop", "fake_merchant") and options_for_state(state) == ["end"]:
+            result = await self._game_client.post_action({"action": "proceed"})
+            logger.info("Auto-left shop — nothing purchasable → %s", result)
+            return True
+
+        return False
+
+    async def _handle_card_remove_event(self, event: VoteNeededEvent, broadcaster: twitchio.PartialUser) -> None:
+        """Handle a card_select 'select' (shop card removal) event with fresh state."""
+        remove_data = await self._game_client.get_state()
+        if not remove_data:
+            logger.warning("Card remove: could not fetch fresh state — discarding")
+            return
+        try:
+            remove_state = GameState.from_api_response(remove_data)
+        except ValueError:
+            logger.warning("Card remove: could not parse fresh state — discarding")
+            return
+        if remove_state.card_select_screen_type == "select":
+            await self._handle_card_remove(broadcaster, remove_state)
+        else:
+            logger.warning(
+                "Card remove: state moved to '%s' before vote started — discarding",
+                remove_state.state_type,
+            )
+
+    async def _handle_smith_upgrade_event(self, event: VoteNeededEvent, broadcaster: twitchio.PartialUser) -> None:
+        """Handle a card_select 'upgrade' (smith upgrade) event with fresh state."""
+        smith_data = await self._game_client.get_state()
+        if not smith_data:
+            logger.warning("Smith upgrade: could not fetch fresh state — discarding")
+            return
+        try:
+            smith_state = GameState.from_api_response(smith_data)
+        except ValueError:
+            logger.warning("Smith upgrade: could not parse fresh state — discarding")
+            return
+        if smith_state.card_select_screen_type == "upgrade":
+            await self._handle_smith_upgrade(broadcaster, smith_state)
+        else:
+            logger.warning(
+                "Smith upgrade: state moved to '%s' before vote started — discarding",
+                smith_state.state_type,
+            )
+
+    async def _handle_vote_needed(self, event: VoteNeededEvent, broadcaster: twitchio.PartialUser) -> None:
+        """Handle a general VoteNeededEvent: stale-check, auto-proceed, vote, execute."""
+        pre_vote_state = await self._fetch_parsed_state()
+
+        if pre_vote_state is not None:
+            if self._is_stale_state(pre_vote_state, event.state.state_type, "vote"):
+                return
+            if await self._try_auto_proceed(pre_vote_state, broadcaster):
+                return
+
+        vote_state = pre_vote_state if pre_vote_state is not None else event.state
+        winner = await self.vote_manager.run_window(
+            broadcaster=broadcaster,
+            bot_id=self.bot_id,
+            options=options_for_state(vote_state),
+            state_summary=vote_state.summary(),
+            labels=labels_for_state(vote_state) or None,
+            preamble=preamble_for_state(vote_state),
+        )
+
+        resolved_target = await self._resolve_any_enemy_target(event.state, winner, broadcaster)
+
+        # Re-fetch so action uses fresh data (e.g. enemies list may be empty on first poll)
+        action_state = (await self._fetch_parsed_state()) or event.state
+        if self._is_stale_state(action_state, event.state.state_type, "vote result"):
+            return
+
+        try:
+            body = build_api_body(action_state, winner, target_entity_id=resolved_target)
+        except ValueError:
+            logger.error(
+                "No API mapping for state=%s winner=%s — skipping action",
+                event.state.state_type,
+                winner,
+            )
+            return
+
+        result = await self._post_action_with_retry(body, winner)
+        await self._handle_post_action(action_state, body, result)
+
+    async def _resolve_any_enemy_target(
+        self,
+        state: GameState,
+        winner: str,
+        broadcaster: twitchio.PartialUser,
+    ) -> str | None:
+        """Return entity_id for AnyEnemy cards or potions; None if not applicable."""
+        if winner.isdigit() and state.is_combat_state():
+            card_index = int(winner) - 1
+            if state.hand_card_target_types.get(card_index, "") == "AnyEnemy":
+                card_name = state.hand_card_names.get(card_index, f"Card {winner}")
+                return await self._run_target_vote(broadcaster, card_name, state.enemies)
+        else:
+            potion_action = parse_potion_winner(winner)
+            if potion_action is not None and potion_action[0] == "use":
+                slot = potion_action[1]
+                potion = next((p for p in state.player_potions if p.get("slot") == slot), None)
+                if potion and potion.get("target_type") == "AnyEnemy":
+                    return await self._run_target_vote(broadcaster, potion_display_name(potion), state.enemies)
+        return None
+
+    async def _post_action_with_retry(self, body: dict, winner: str) -> dict | None:
+        """POST an action to the game API; retry once on failure."""
+        result = await self._game_client.post_action(body)
+        if result is None:
+            logger.warning("Action POST failed, retrying once...")
+            result = await self._game_client.post_action(body)
+            if result is None:
+                logger.error("Action POST failed twice for body=%s — system may be stuck", body)
+            else:
+                logger.info("Action executed (retry): %s → %s", winner, result)
+        else:
+            logger.info("Action executed: %s → %s", winner, result)
+        return result
+
+    async def _handle_post_action(
+        self,
+        action_state: GameState,
+        body: dict,
+        result: dict | None,
+    ) -> None:
+        """Dispatch post-action follow-up logic based on state type and action."""
+        action = body.get("action", "")
+
+        # shop/fake_merchant: re-queue vote after purchase or potion use
+        if action_state.state_type in ("shop", "fake_merchant") and action in ("shop_purchase", "use_potion") and result is not None:
+            post_state = await self._fetch_parsed_state()
+            if post_state and post_state.state_type == action_state.state_type:
+                logger.info("Shop purchase complete — re-queuing vote")
+                self._event_queue.put_nowait(VoteNeededEvent(post_state))
+
+        # Any state: re-queue after discard so the vote reflects the updated belt
+        if action == "discard_potion" and result is not None:
+            post_state = await self._fetch_parsed_state()
+            if post_state and post_state.requires_player_input():
+                self._event_queue.put_nowait(VoteNeededEvent(post_state))
+
+        # rest_site: after choosing an option, poll until can_proceed=True then decide
+        if action_state.state_type == "rest_site" and action == "choose_rest_option":
+            for _ in range(10):
+                await asyncio.sleep(1.0)
+                post_rest_state = await self._fetch_parsed_state()
+                if post_rest_state is None:
+                    break
+                if post_rest_state.state_type != "rest_site":
+                    logger.info("rest_site: state moved to '%s' — done", post_rest_state.state_type)
+                    break
+                if post_rest_state.rest_site_can_proceed:
+                    enabled = [
+                        o for o in post_rest_state.rest_site_options
+                        if o.get("is_enabled", True) and not o.get("is_proceed")
+                    ]
+                    if enabled:
+                        # Miniature Tent: more options still available — re-queue vote
+                        logger.info("rest_site: can_proceed but options remain — re-queuing vote")
+                        self._event_queue.put_nowait(VoteNeededEvent(post_rest_state))
+                    else:
+                        proceed_result = await self._game_client.post_action({"action": "proceed"})
+                        logger.info("Auto-proceeded after rest_site option → %s", proceed_result)
+                    break
+            else:
+                logger.warning("rest_site: can_proceed never became True after 10s — may be stuck")
+
+        # hand_select: confirm when can_confirm=True, re-queue if more selections needed
+        elif action_state.state_type == "hand_select" and action == "combat_select_card":
+            hs_data = await self._game_client.get_state()
+            if not hs_data:
+                confirm_result = await self._game_client.post_action({"action": "combat_confirm_selection"})
+                logger.info("Auto-confirmed hand_select (no fresh state) → %s", confirm_result)
+            else:
+                try:
+                    hs_state = GameState.from_api_response(hs_data)
+                except ValueError:
+                    confirm_result = await self._game_client.post_action({"action": "combat_confirm_selection"})
+                    logger.info("Auto-confirmed hand_select (state parse failed) → %s", confirm_result)
+                else:
+                    if hs_state.state_type == "hand_select":
+                        if hs_state.hand_select_can_confirm:
+                            confirm_result = await self._game_client.post_action({"action": "combat_confirm_selection"})
+                            logger.info("Auto-confirmed hand_select → %s", confirm_result)
+                        else:
+                            logger.info("hand_select: more selections needed — re-queuing vote")
+                            self._event_queue.put_nowait(VoteNeededEvent(hs_state))
+
+        # card_select: re-queue if more selections needed, auto-confirm when ready
+        elif action_state.state_type == "card_select" and action == "select_card":
+            cs_data = await self._game_client.get_state()
+            if cs_data:
+                try:
+                    cs_state = GameState.from_api_response(cs_data)
+                except ValueError:
+                    pass
+                else:
+                    if cs_state.state_type == "card_select":
+                        if cs_state.card_select_can_confirm:
+                            confirm_result = await self._game_client.post_action({"action": "confirm_selection"})
+                            logger.info("Auto-confirmed card_select → %s", confirm_result)
+                        else:
+                            logger.info("card_select: more selections needed — re-queuing vote")
+                            self._event_queue.put_nowait(VoteNeededEvent(cs_state))
+
+        # Dry-run: game state never changes so the poller never fires a new event.
+        # Re-queue manually so testing can continue without restarting the bot.
+        if self._game_client.dry_run:
+            dry_run_state = await self._fetch_parsed_state()
+            if dry_run_state and dry_run_state.requires_player_input():
+                self._event_queue.put_nowait(VoteNeededEvent(dry_run_state))
 
     async def _run_target_vote(
         self,
