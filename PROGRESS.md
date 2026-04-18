@@ -4,20 +4,20 @@
 `PoC`
 
 ## Recently Completed
+- #60 — DRY chat-send: `_chat()` helper, `self.broadcaster` cached once, all send sites unified, `ChatComponent` no longer fetches users or touches private attrs; live-tested
+- #69 — Polling fix: draw-card effects (e.g. Soul) now always trigger re-vote via `asyncio.Event` signal from action POST + `hand_size != previous` condition
 - #59 — All 7 hardcoded timings/retries promoted to settings.yaml; threaded through loader, clients, polling, options, bot
 - #62 — 165-test suite: state/actions/options/labels/polling/api_client/vote_manager; runs via `python -m pytest`, no live deps
-- #58 — Refactor _event_runner (379 lines) into 9 focused methods; _event_runner now 45 lines; fixed polling bug for draw-on-play cards
-- #56 — !help command (any time, not vote-gated) + README (setup, .env, mods, commands cheat sheet); live-tested
 
 ## Active Issue
 None
 
 ## Up Next
-1. #60 — Chat-send DRY + broadcaster caching
-2. #53 — Full belt + potion reward: discard-to-claim flow
-3. #63 — End-game screen navigation (victory, defeat, unlocks)
-4. #7 — Database Logging
-5. #61 — Bundled minor code-hygiene cleanups
+1. #53 — Full belt + potion reward: discard-to-claim flow
+2. #63 — End-game screen navigation (victory, defeat, unlocks)
+3. #7 — Database Logging
+4. #61 — Bundled minor code-hygiene cleanups
+5. #68 — Streaming setup & run logistics: OBS config, STS2 mod wiring, launch checklist
 
 ## Key Decisions
 - Bot and game run on same PC (localhost API)

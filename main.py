@@ -61,11 +61,13 @@ async def main() -> None:
     recheck_attempts = config["game"].get("mid_turn_recheck_attempts", 5)
     recheck_interval = config["game"].get("mid_turn_recheck_interval_seconds", 0.5)
     event_queue: asyncio.Queue[GameEvent] = asyncio.Queue()
+    action_signal: asyncio.Event = asyncio.Event()
 
-    async with TwitchBot(config, event_queue, game_client, menu_client) as bot:
+    async with TwitchBot(config, event_queue, game_client, menu_client, action_signal) as bot:
         poll_task = asyncio.create_task(
             poll_game_state(game_client, interval, event_queue,
-                            recheck_attempts=recheck_attempts, recheck_interval=recheck_interval)
+                            recheck_attempts=recheck_attempts, recheck_interval=recheck_interval,
+                            action_signal=action_signal)
         )
         try:
             await bot.start()
