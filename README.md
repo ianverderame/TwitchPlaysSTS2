@@ -75,6 +75,9 @@ Edit `config/settings.yaml` to tune behavior. Defaults are reasonable for most s
 | `menu` | `transition_retry_attempts` | `3` | Retries waiting for CHARACTER_SELECT after menu open |
 | `menu` | `transition_retry_interval_seconds` | `0.5` | Interval between transition retries |
 | `potions` | `max_belt_size` | `3` | Belt capacity (until the API exposes it directly) |
+| `logging` | `level` | `"INFO"` | Bot log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `logging` | `twitchio_level` | `"WARNING"` | Log level for TwitchIO internals |
+| `logging` | `httpx_level` | `"WARNING"` | Log level for httpx internals |
 
 ### 4. Install STS2 mods
 
