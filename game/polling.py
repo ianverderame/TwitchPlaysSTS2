@@ -48,6 +48,7 @@ async def poll_game_state(
     event_queue: asyncio.Queue[GameEvent],
     recheck_attempts: int = 5,
     recheck_interval: float = 0.5,
+    action_signal: asyncio.Event | None = None,
 ) -> None:
     """Poll STS2MCP every `interval` seconds and emit typed GameEvents on state transitions."""
     previous_state: GameState | None = None
@@ -129,9 +130,11 @@ async def poll_game_state(
                             )
                             event_queue.put_nowait(VoteNeededEvent(state))
                         elif (
+                            (action_signal is not None and action_signal.is_set())
+                        ) or (
                             state.hand_size is not None
                             and previous_state.hand_size is not None
-                            and state.hand_size < previous_state.hand_size
+                            and state.hand_size != previous_state.hand_size
                         ) or (
                             set(state.playable_card_indices) != set(previous_state.playable_card_indices)
                         ) or (
@@ -141,10 +144,12 @@ async def poll_game_state(
                             and previous_state.player_energy is not None
                             and state.player_energy < previous_state.player_energy
                         ):
-                            # Card was played mid-turn, playable cards changed (e.g. relic drew
-                            # a card), or a potion was consumed. Poll briefly before re-queuing —
-                            # some cards (e.g. Dagger Throw) or potions may trigger hand_select
-                            # after a short delay.
+                            # Action was just posted (guaranteed recheck), hand size changed,
+                            # playable cards changed, or a potion was consumed. Poll briefly before
+                            # re-queuing — some cards (e.g. Dagger Throw) or potions may trigger
+                            # hand_select after a short delay.
+                            if action_signal is not None:
+                                action_signal.clear()
                             recheck_state = state
                             for _ in range(recheck_attempts):
                                 await asyncio.sleep(recheck_interval)

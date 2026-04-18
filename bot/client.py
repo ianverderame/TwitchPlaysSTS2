@@ -85,14 +85,7 @@ class ChatComponent(commands.Component):
         self._game_client = game_client
 
     async def _send_chat(self, message: str) -> None:
-        """Send a message to the broadcaster's channel."""
-        users = await self.bot.fetch_users(ids=[self.bot._owner_id])
-        if users:
-            await users[0].send_message(
-                message=message,
-                sender=self.bot.bot_id,
-                token_for=self.bot.bot_id,
-            )
+        await self.bot._chat(message)
 
     @commands.Component.listener()
     async def event_message(self, payload: twitchio.ChatMessage) -> None:
@@ -275,6 +268,7 @@ class TwitchBot(commands.Bot):
         event_queue: asyncio.Queue[GameEvent],
         game_client: STS2Client,
         menu_client: MenuClient,
+        action_signal: asyncio.Event | None = None,
     ) -> None:
         self._channel = config["twitch"]["channel"]
         self._owner_id = config["twitch"]["owner_id"]
@@ -286,6 +280,7 @@ class TwitchBot(commands.Bot):
         self._event_queue = event_queue
         self._game_client = game_client
         self._menu_client = menu_client
+        self._action_signal = action_signal
         self.vote_manager = VoteManager(config["vote"]["duration_seconds"])
         self._target_vote_duration: float = config["vote"]["target_duration_seconds"]
         self._smith_vote_duration: float = config["vote"].get("smith_vote_duration_seconds", 30.0)
@@ -302,6 +297,7 @@ class TwitchBot(commands.Bot):
         self._menu_transition_retry_attempts: int = menu_cfg.get("transition_retry_attempts", 3)
         self._menu_transition_retry_interval: float = menu_cfg.get("transition_retry_interval_seconds", 0.5)
 
+        self.broadcaster: twitchio.PartialUser | None = None
         self._ready = asyncio.Event()  # set in event_ready; gates _event_runner
 
         super().__init__(
@@ -328,16 +324,19 @@ class TwitchBot(commands.Bot):
 
         asyncio.create_task(self._event_runner(), name="event-runner")
 
-    async def event_ready(self) -> None:
-        logger.info("Connected to Twitch as %s", self.user)
-        users = await self.fetch_users(ids=[self._owner_id])
-        broadcaster = users[0]
-        message = "[DRY RUN] Bot is online — votes run but actions are NOT sent to the game." if self._game_client.dry_run else "Bot is online!"
-        await broadcaster.send_message(
+    async def _chat(self, message: str) -> None:
+        await self.broadcaster.send_message(
             message=message,
             sender=self.bot_id,
             token_for=self.bot_id,
         )
+
+    async def event_ready(self) -> None:
+        logger.info("Connected to Twitch as %s", self.user)
+        users = await self.fetch_users(ids=[self._owner_id])
+        self.broadcaster = users[0]
+        message = "[DRY RUN] Bot is online — votes run but actions are NOT sent to the game." if self._game_client.dry_run else "Bot is online!"
+        await self._chat(message)
         self._ready.set()
 
     async def event_command_error(self, payload: commands.CommandErrorPayload) -> None:
@@ -350,8 +349,7 @@ class TwitchBot(commands.Bot):
         """Background task: dequeue GameEvents and handle each in chat."""
         logger.info("Event runner started")
         await self._ready.wait()  # ensure event_ready has fired before sending to chat
-        users = await self.fetch_users(ids=[self._owner_id])
-        broadcaster: twitchio.PartialUser = users[0]
+        broadcaster = self.broadcaster
 
         while True:
             try:
@@ -361,18 +359,10 @@ class TwitchBot(commands.Bot):
 
                 if isinstance(event, GameStartedEvent):
                     logger.info("Game started: %s", event.state.summary())
-                    await broadcaster.send_message(
-                        message="A new run has started! Type !<choice> to vote when prompted.",
-                        sender=self.bot_id,
-                        token_for=self.bot_id,
-                    )
+                    await self._chat("A new run has started! Type !<choice> to vote when prompted.")
                 elif isinstance(event, GameEndedEvent):
                     logger.info("Game ended: %s", event.state.summary())
-                    await broadcaster.send_message(
-                        message="Run over! Thanks for playing.",
-                        sender=self.bot_id,
-                        token_for=self.bot_id,
-                    )
+                    await self._chat("Run over! Thanks for playing.")
                 elif isinstance(event, MenuSelectNeededEvent):
                     await self._handle_menu_select(broadcaster)
                 elif isinstance(event, VoteNeededEvent) and event.state.state_type == "rewards":
@@ -435,11 +425,7 @@ class TwitchBot(commands.Bot):
         ):
             option = state.event_options[0]
             label = option.get("title") or "Proceed"
-            await broadcaster.send_message(
-                message=f"One option available: {label}",
-                sender=self.bot_id,
-                token_for=self.bot_id,
-            )
+            await self._chat(f"One option available: {label}")
             await asyncio.sleep(self._auto_proceed_delay)
             result = await self._game_client.post_action({"action": "choose_event_option", "index": option["index"]})
             logger.info("Auto-proceeding event (single option '%s') → %s", label, result)
@@ -461,11 +447,7 @@ class TwitchBot(commands.Bot):
 
         # Single map node — no vote needed, short delay for readability
         if state.state_type == "map" and len(state.map_next_options) == 1:
-            await broadcaster.send_message(
-                message="One path available — proceeding",
-                sender=self.bot_id,
-                token_for=self.bot_id,
-            )
+            await self._chat("One path available — proceeding")
             await asyncio.sleep(self._auto_proceed_delay)
             result = await self._game_client.post_action({"action": "choose_map_node", "index": 0})
             logger.info("Auto-selected single map node → %s", result)
@@ -478,11 +460,7 @@ class TwitchBot(commands.Bot):
             await asyncio.sleep(self._auto_proceed_delay)
             result = await self._game_client.post_action({"action": "claim_treasure_relic", "index": relic["index"]})
             logger.info("Auto-claimed treasure relic '%s' → %s", relic_name, result)
-            await broadcaster.send_message(
-                message=f"Claimed {relic_name}!",
-                sender=self.bot_id,
-                token_for=self.bot_id,
-            )
+            await self._chat(f"Claimed {relic_name}!")
             proceed_result = await self._game_client.post_action({"action": "proceed"})
             logger.info("Auto-proceeded from treasure → %s", proceed_result)
             return True
@@ -599,12 +577,16 @@ class TwitchBot(commands.Bot):
         result = await self._game_client.post_action(body)
         if result is not None:
             logger.info("Action executed: %s → %s", winner, result)
+            if self._action_signal:
+                self._action_signal.set()
             return result
         for attempt in range(1, self._action_retry_count + 1):
             logger.warning("Action POST failed, retrying (attempt %d/%d)...", attempt, self._action_retry_count)
             result = await self._game_client.post_action(body)
             if result is not None:
                 logger.info("Action executed (retry %d): %s → %s", attempt, winner, result)
+                if self._action_signal:
+                    self._action_signal.set()
                 return result
         logger.error("Action POST failed after %d retries for body=%s — system may be stuck", self._action_retry_count, body)
         return None
@@ -822,13 +804,11 @@ class TwitchBot(commands.Bot):
                 "Grant the bot 'moderator:manage:announcements' for highlighted announcements.",
                 state_summary, exc,
             )
-            await broadcaster.send_message(message=header, sender=self.bot_id, token_for=self.bot_id)
+            await self._chat(header)
 
         entries = [f"{i + 1}. {groups[i][0]}" for i in range(len(groups))]
         for chunk in _chunk_card_list(entries, separator=" | "):
-            await broadcaster.send_message(
-                message=" | ".join(chunk), sender=self.bot_id, token_for=self.bot_id
-            )
+            await self._chat(" | ".join(chunk))
 
         winner = await self.vote_manager.run_window(
             broadcaster=broadcaster,
@@ -996,11 +976,7 @@ class TwitchBot(commands.Bot):
             f"!{opt}={_fmt(enabled[int(opt) - 1]['character_id'])}" for opt in options
         )
         asc_str = f" | Ascension {ascension}" if ascension else ""
-        await broadcaster.send_message(
-            message=f"Choose your character{asc_str}: {char_list}",
-            sender=self.bot_id,
-            token_for=self.bot_id,
-        )
+        await self._chat(f"Choose your character{asc_str}: {char_list}")
 
         winner = await self.vote_manager.run_window(
             broadcaster=broadcaster,
@@ -1027,8 +1003,4 @@ class TwitchBot(commands.Bot):
 
         asc_display = f" (Ascension {ascension})" if ascension else ""
         logger.info("Embarking as %s%s", winning_char, asc_display)
-        await broadcaster.send_message(
-            message=f"Starting run as {winning_char}{asc_display}!",
-            sender=self.bot_id,
-            token_for=self.bot_id,
-        )
+        await self._chat(f"Starting run as {winning_char}{asc_display}!")
