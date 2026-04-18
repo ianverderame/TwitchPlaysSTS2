@@ -46,6 +46,8 @@ async def poll_game_state(
     client: STS2Client,
     interval: float,
     event_queue: asyncio.Queue[GameEvent],
+    recheck_attempts: int = 5,
+    recheck_interval: float = 0.5,
 ) -> None:
     """Poll STS2MCP every `interval` seconds and emit typed GameEvents on state transitions."""
     previous_state: GameState | None = None
@@ -144,8 +146,8 @@ async def poll_game_state(
                             # some cards (e.g. Dagger Throw) or potions may trigger hand_select
                             # after a short delay.
                             recheck_state = state
-                            for _ in range(5):
-                                await asyncio.sleep(0.5)
+                            for _ in range(recheck_attempts):
+                                await asyncio.sleep(recheck_interval)
                                 recheck_data = await client.get_state()
                                 if not recheck_data:
                                     break

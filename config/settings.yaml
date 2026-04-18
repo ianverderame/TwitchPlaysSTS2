@@ -13,10 +13,25 @@ game:
   poll_interval_seconds: 1     # How often to check STS2 game state
   dry_run: false               # true = votes run normally but actions are never sent to the game API
   auto_proceed_delay_seconds: 3  # Pause before auto-proceeding single-option screens (event/map/treasure)
+  rest_site_poll_attempts: 10        # Max polls waiting for can_proceed=True after a rest-site choice
+  rest_site_poll_interval_seconds: 1.0
+  mid_turn_recheck_attempts: 5       # Extra polls after a card play / potion to catch immediate state changes
+  mid_turn_recheck_interval_seconds: 0.5
+  action_retry_count: 1              # How many times to retry a failed action POST
 
 api:
   sts2mcp_base_url: ""     # Required — set STS2MCP_BASE_URL in .env
   sts2_menu_base_url: ""   # Required — set STS2_MENU_BASE_URL in .env
+  http_timeout_seconds: 5.0  # HTTP client timeout for all game/menu API calls
+
+menu:
+  initial_query_retry_attempts: 5     # Retries when MenuControl may still be initializing
+  initial_query_retry_interval_seconds: 1.0
+  transition_retry_attempts: 3        # Retries waiting for CHARACTER_SELECT after open_character_select
+  transition_retry_interval_seconds: 0.5
+
+potions:
+  max_belt_size: 3  # STS2 default belt capacity (until the API exposes it directly)
 
 database:
   path: "data/game_history.db"

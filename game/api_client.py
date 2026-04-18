@@ -6,9 +6,9 @@ logger = logging.getLogger(__name__)
 
 
 class STS2Client:
-    def __init__(self, base_url: str, dry_run: bool = False) -> None:
+    def __init__(self, base_url: str, dry_run: bool = False, http_timeout: float = 5.0) -> None:
         self._base_url = base_url.rstrip("/")
-        self._http = httpx.AsyncClient(timeout=5.0)
+        self._http = httpx.AsyncClient(timeout=http_timeout)
         self.dry_run = dry_run
 
     async def close(self) -> None:

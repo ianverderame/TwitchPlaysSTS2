@@ -6,9 +6,9 @@ logger = logging.getLogger(__name__)
 
 
 class MenuClient:
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: str, http_timeout: float = 5.0) -> None:
         self._base_url = base_url.rstrip("/")
-        self._http = httpx.AsyncClient(timeout=5.0)
+        self._http = httpx.AsyncClient(timeout=http_timeout)
 
     async def close(self) -> None:
         """Close the underlying HTTP client."""
