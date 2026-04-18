@@ -92,6 +92,28 @@ Type `!help` in chat for a quick reference. Full list:
 | `?N` | Any time | Show info for card in hand slot N (e.g. `?2`) |
 | `((card name))` | Any time | Look up a card by name with wiki link |
 
+## Tests
+
+The test suite runs without the game or Twitch — all external calls are mocked.
+
+```bash
+python -m pytest
+```
+
+Verbose output (shows each test name):
+
+```bash
+python -m pytest -v
+```
+
+Run a single file:
+
+```bash
+python -m pytest tests/game/test_actions.py -v
+```
+
+165 tests across `game/` and `bot/` modules. `bot/client.py` is not covered (twitchio integration complexity).
+
 ## Logs
 
 Logs are written to `logs/bot.log` (truncated each run) and the terminal. Check this file after a session for debugging.

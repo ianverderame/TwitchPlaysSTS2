@@ -4,10 +4,10 @@
 `PoC`
 
 ## Recently Completed
-- #58 — Refactor _event_runner (379 lines) into 9 focused methods; _event_runner now 45 lines; fixed polling bug for draw-on-play cards (Pommel Strike etc.)
-- Backlog cleanup + senior code review — consolidated #12/#13 into #14, merged #40 into #29, expanded #36 scope; opened #58–#61
+- #62 — 165-test suite: state/actions/options/labels/polling/api_client/vote_manager; runs via `python -m pytest`, no live deps
+- #58 — Refactor _event_runner (379 lines) into 9 focused methods; _event_runner now 45 lines; fixed polling bug for draw-on-play cards
 - #56 — !help command (any time, not vote-gated) + README (setup, .env, mods, commands cheat sheet); live-tested
-- #51 — Potions: use/discard voting (!pN/!dN), belt filter in shop, AnyEnemy target vote, ?potions/?p command, dry-run mode, file logging, auto_proceed_delay config; live-tested
+- #51 — Potions: use/discard voting (!pN/!dN), belt filter in shop, AnyEnemy target vote, ?potions/?p command, dry-run mode
 
 ## Active Issue
 None
@@ -25,7 +25,7 @@ None
 - All API URLs required via .env — no hardcoded defaults in committed files
 - Fail loud on missing config at startup
 - Logging at INFO level to terminal + `logs/bot.log` (truncated each run, gitignored)
-- No automated tests for PoC
+- Test suite: `python -m pytest` from project root; 165 tests, no live deps; `bot/client.py` not tested (twitchio mocking complexity)
 - GitHub Issues for all task tracking; Claude can create/label/prioritize autonomously
 - `PROGRESS.md` stays capped at ~20-30 lines; full history lives in GitHub Issues
 - STS2MCP API on `localhost:15526`; enemy `entity_id` lives at `battle.enemies[i].entity_id`
