@@ -48,9 +48,9 @@ def load_config() -> dict:
             "channel": os.environ["TWITCH_CHANNEL"],
         },
         "api": {
+            **settings.get("api", {}),
             "sts2mcp_base_url": os.environ["STS2MCP_BASE_URL"],
             "sts2_menu_base_url": os.environ["STS2_MENU_BASE_URL"],
-            **settings.get("api", {}),
         },
         "vote": settings.get("vote", {}),
         "game": settings.get("game", {}),
