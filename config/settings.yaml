@@ -33,5 +33,10 @@ menu:
 potions:
   max_belt_size: 3  # STS2 default belt capacity (until the API exposes it directly)
 
+logging:
+  level: "INFO"             # Bot log level (DEBUG, INFO, WARNING, ERROR)
+  twitchio_level: "WARNING" # Suppress verbose TwitchIO output
+  httpx_level: "WARNING"    # Suppress verbose httpx output
+
 database:
   path: "data/game_history.db"

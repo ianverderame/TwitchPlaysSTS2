@@ -30,6 +30,9 @@ async def main() -> None:
         logger.error("Startup failed: %s", e)
         sys.exit(1)
 
+    log_cfg = config.get("logging", {})
+    logging.getLogger().setLevel(log_cfg.get("level", "INFO"))
+
     dry_run = bool(config["game"].get("dry_run", False))
     if dry_run:
         logger.warning("DRY RUN MODE — actions will be logged but NOT sent to the game API")
@@ -51,8 +54,8 @@ async def main() -> None:
         logger.warning("MenuControl API not reachable at startup — character select will retry when needed")
 
     # Quieten verbose third-party loggers
-    logging.getLogger("twitchio").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("twitchio").setLevel(log_cfg.get("twitchio_level", "WARNING"))
+    logging.getLogger("httpx").setLevel(log_cfg.get("httpx_level", "WARNING"))
 
     interval = config["game"]["poll_interval_seconds"]
     recheck_attempts = config["game"].get("mid_turn_recheck_attempts", 5)
