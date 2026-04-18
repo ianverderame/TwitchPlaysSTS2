@@ -119,8 +119,10 @@ class VoteManager:
         terminal actions like "end", "skip", "cancel" are never chosen without an explicit vote.
         Falls back to the full options list only if there are no numeric options at all.
         """
+        _terminal = frozenset({"end", "skip", "cancel"})
         numeric_options = [o for o in options if o.isdigit()]
-        random_pool = numeric_options if numeric_options else options
+        non_terminal = [o for o in options if o not in _terminal]
+        random_pool = numeric_options if numeric_options else (non_terminal if non_terminal else options)
 
         if not self._votes:
             winner = random.choice(random_pool)
