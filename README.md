@@ -54,7 +54,27 @@ Bot token required scopes: `user:read:chat user:write:chat user:bot moderator:ma
 
 ### 3. Configure settings
 
-Edit `config/settings.yaml` to adjust vote durations, poll interval, etc. The defaults are reasonable for most setups.
+Edit `config/settings.yaml` to tune behavior. Defaults are reasonable for most setups.
+
+| Section | Key | Default | Description |
+|---|---|---|---|
+| `vote` | `duration_seconds` | `10` | Vote window length |
+| `vote` | `target_duration_seconds` | `10` | Target-selection vote length |
+| `vote` | `smith_vote_duration_seconds` | `30` | Smith upgrade vote length |
+| `game` | `poll_interval_seconds` | `1` | How often to poll game state |
+| `game` | `dry_run` | `false` | Log actions without sending to game |
+| `game` | `auto_proceed_delay_seconds` | `3` | Pause before auto-proceeding single-option screens |
+| `game` | `rest_site_poll_attempts` | `10` | Max polls waiting for rest site to allow proceed |
+| `game` | `rest_site_poll_interval_seconds` | `1.0` | Interval between rest site polls |
+| `game` | `mid_turn_recheck_attempts` | `5` | Extra polls after a card play or potion use |
+| `game` | `mid_turn_recheck_interval_seconds` | `0.5` | Interval between mid-turn rechecks |
+| `game` | `action_retry_count` | `1` | Retries on a failed action POST |
+| `api` | `http_timeout_seconds` | `5.0` | HTTP timeout for game/menu API calls |
+| `menu` | `initial_query_retry_attempts` | `5` | Retries when MenuControl may still be initializing |
+| `menu` | `initial_query_retry_interval_seconds` | `1.0` | Interval between initial query retries |
+| `menu` | `transition_retry_attempts` | `3` | Retries waiting for CHARACTER_SELECT after menu open |
+| `menu` | `transition_retry_interval_seconds` | `0.5` | Interval between transition retries |
+| `potions` | `max_belt_size` | `3` | Belt capacity (until the API exposes it directly) |
 
 ### 4. Install STS2 mods
 

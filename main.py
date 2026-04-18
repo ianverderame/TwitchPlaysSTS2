@@ -34,8 +34,9 @@ async def main() -> None:
     if dry_run:
         logger.warning("DRY RUN MODE — actions will be logged but NOT sent to the game API")
 
-    game_client = STS2Client(config["api"]["sts2mcp_base_url"], dry_run=dry_run)
-    menu_client = MenuClient(config["api"]["sts2_menu_base_url"])
+    http_timeout = config["api"].get("http_timeout_seconds", 5.0)
+    game_client = STS2Client(config["api"]["sts2mcp_base_url"], dry_run=dry_run, http_timeout=http_timeout)
+    menu_client = MenuClient(config["api"]["sts2_menu_base_url"], http_timeout=http_timeout)
 
     state = await game_client.get_state()
     if state is not None:
@@ -54,11 +55,14 @@ async def main() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     interval = config["game"]["poll_interval_seconds"]
+    recheck_attempts = config["game"].get("mid_turn_recheck_attempts", 5)
+    recheck_interval = config["game"].get("mid_turn_recheck_interval_seconds", 0.5)
     event_queue: asyncio.Queue[GameEvent] = asyncio.Queue()
 
     async with TwitchBot(config, event_queue, game_client, menu_client) as bot:
         poll_task = asyncio.create_task(
-            poll_game_state(game_client, interval, event_queue)
+            poll_game_state(game_client, interval, event_queue,
+                            recheck_attempts=recheck_attempts, recheck_interval=recheck_interval)
         )
         try:
             await bot.start()

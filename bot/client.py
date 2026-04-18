@@ -290,6 +290,18 @@ class TwitchBot(commands.Bot):
         self._target_vote_duration: float = config["vote"]["target_duration_seconds"]
         self._smith_vote_duration: float = config["vote"].get("smith_vote_duration_seconds", 30.0)
         self._auto_proceed_delay: float = config["game"].get("auto_proceed_delay_seconds", 3.0)
+
+        game_cfg = config["game"]
+        menu_cfg = config.get("menu", {})
+        self._rest_site_poll_attempts: int = game_cfg.get("rest_site_poll_attempts", 10)
+        self._rest_site_poll_interval: float = game_cfg.get("rest_site_poll_interval_seconds", 1.0)
+        self._action_retry_count: int = game_cfg.get("action_retry_count", 1)
+        self._max_belt_size: int = config.get("potions", {}).get("max_belt_size", 3)
+        self._menu_initial_retry_attempts: int = menu_cfg.get("initial_query_retry_attempts", 5)
+        self._menu_initial_retry_interval: float = menu_cfg.get("initial_query_retry_interval_seconds", 1.0)
+        self._menu_transition_retry_attempts: int = menu_cfg.get("transition_retry_attempts", 3)
+        self._menu_transition_retry_interval: float = menu_cfg.get("transition_retry_interval_seconds", 0.5)
+
         self._ready = asyncio.Event()  # set in event_ready; gates _event_runner
 
         super().__init__(
@@ -476,7 +488,7 @@ class TwitchBot(commands.Bot):
             return True
 
         # Shop/fake_merchant with nothing purchasable — no vote needed
-        if state.state_type in ("shop", "fake_merchant") and options_for_state(state) == ["end"]:
+        if state.state_type in ("shop", "fake_merchant") and options_for_state(state, max_belt_size=self._max_belt_size) == ["end"]:
             result = await self._game_client.post_action({"action": "proceed"})
             logger.info("Auto-left shop — nothing purchasable → %s", result)
             return True
@@ -535,7 +547,7 @@ class TwitchBot(commands.Bot):
         winner = await self.vote_manager.run_window(
             broadcaster=broadcaster,
             bot_id=self.bot_id,
-            options=options_for_state(vote_state),
+            options=options_for_state(vote_state, max_belt_size=self._max_belt_size),
             state_summary=vote_state.summary(),
             labels=labels_for_state(vote_state) or None,
             preamble=preamble_for_state(vote_state),
@@ -583,18 +595,19 @@ class TwitchBot(commands.Bot):
         return None
 
     async def _post_action_with_retry(self, body: dict, winner: str) -> dict | None:
-        """POST an action to the game API; retry once on failure."""
+        """POST an action to the game API; retry up to action_retry_count times on failure."""
         result = await self._game_client.post_action(body)
-        if result is None:
-            logger.warning("Action POST failed, retrying once...")
-            result = await self._game_client.post_action(body)
-            if result is None:
-                logger.error("Action POST failed twice for body=%s — system may be stuck", body)
-            else:
-                logger.info("Action executed (retry): %s → %s", winner, result)
-        else:
+        if result is not None:
             logger.info("Action executed: %s → %s", winner, result)
-        return result
+            return result
+        for attempt in range(1, self._action_retry_count + 1):
+            logger.warning("Action POST failed, retrying (attempt %d/%d)...", attempt, self._action_retry_count)
+            result = await self._game_client.post_action(body)
+            if result is not None:
+                logger.info("Action executed (retry %d): %s → %s", attempt, winner, result)
+                return result
+        logger.error("Action POST failed after %d retries for body=%s — system may be stuck", self._action_retry_count, body)
+        return None
 
     async def _handle_post_action(
         self,
@@ -620,8 +633,8 @@ class TwitchBot(commands.Bot):
 
         # rest_site: after choosing an option, poll until can_proceed=True then decide
         if action_state.state_type == "rest_site" and action == "choose_rest_option":
-            for _ in range(10):
-                await asyncio.sleep(1.0)
+            for _ in range(self._rest_site_poll_attempts):
+                await asyncio.sleep(self._rest_site_poll_interval)
                 post_rest_state = await self._fetch_parsed_state()
                 if post_rest_state is None:
                     break
@@ -642,7 +655,7 @@ class TwitchBot(commands.Bot):
                         logger.info("Auto-proceeded after rest_site option → %s", proceed_result)
                     break
             else:
-                logger.warning("rest_site: can_proceed never became True after 10s — may be stuck")
+                logger.warning("rest_site: can_proceed never became True after %d polls — may be stuck", self._rest_site_poll_attempts)
 
         # hand_select: confirm when can_confirm=True, re-queue if more selections needed
         elif action_state.state_type == "hand_select" and action == "combat_select_card":
@@ -919,11 +932,11 @@ class TwitchBot(commands.Bot):
         """Handle a MenuSelectNeededEvent: navigate to character select, run vote, embark."""
         # Retry initial query — MenuControl may still be initializing when STS2MCP first reports menu
         menu_data = None
-        for _ in range(5):
+        for _ in range(self._menu_initial_retry_attempts):
             menu_data = await self._menu_client.get_menu_state()
             if menu_data and menu_data.get("screen") not in (None, "UNKNOWN", "IN_GAME"):
                 break
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(self._menu_initial_retry_interval)
         if not menu_data:
             logger.warning("MenuControl API unreachable — skipping character select vote")
             return
@@ -945,8 +958,8 @@ class TwitchBot(commands.Bot):
                 return
 
             # Re-query with retries — open_character_select may need a moment to transition
-            for _ in range(3):
-                await asyncio.sleep(0.5)
+            for _ in range(self._menu_transition_retry_attempts):
+                await asyncio.sleep(self._menu_transition_retry_interval)
                 menu_data = await self._menu_client.get_menu_state()
                 if menu_data and menu_data.get("screen") == "CHARACTER_SELECT":
                     screen = "CHARACTER_SELECT"

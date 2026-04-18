@@ -4,21 +4,20 @@
 `PoC`
 
 ## Recently Completed
+- #59 — All 7 hardcoded timings/retries promoted to settings.yaml; threaded through loader, clients, polling, options, bot
 - #62 — 165-test suite: state/actions/options/labels/polling/api_client/vote_manager; runs via `python -m pytest`, no live deps
 - #58 — Refactor _event_runner (379 lines) into 9 focused methods; _event_runner now 45 lines; fixed polling bug for draw-on-play cards
 - #56 — !help command (any time, not vote-gated) + README (setup, .env, mods, commands cheat sheet); live-tested
-- #51 — Potions: use/discard voting (!pN/!dN), belt filter in shop, AnyEnemy target vote, ?potions/?p command, dry-run mode
 
 ## Active Issue
 None
 
 ## Up Next
-1. #59 — Move hardcoded timings/retries to settings.yaml
-2. #60 — Chat-send DRY + broadcaster caching
-3. #53 — Full belt + potion reward: discard-to-claim flow
-4. #63 — End-game screen navigation (victory, defeat, unlocks)
-5. #7 — Database Logging
-6. #61 — Bundled minor code-hygiene cleanups
+1. #60 — Chat-send DRY + broadcaster caching
+2. #53 — Full belt + potion reward: discard-to-claim flow
+3. #63 — End-game screen navigation (victory, defeat, unlocks)
+4. #7 — Database Logging
+5. #61 — Bundled minor code-hygiene cleanups
 
 ## Key Decisions
 - Bot and game run on same PC (localhost API)
