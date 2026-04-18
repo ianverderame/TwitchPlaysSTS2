@@ -12,7 +12,7 @@ from game.api_client import STS2Client
 from game.events import GameEndedEvent, GameEvent, GameStartedEvent, MenuSelectNeededEvent, VoteNeededEvent
 from game.menu_client import MenuClient
 from game.labels import MAP_ROOM_LABELS, labels_for_state, preamble_for_state, target_labels_for_enemies
-from game.options import options_for_state, parse_potion_winner, potion_display_name
+from game.options import options_for_state, parse_potion_winner, potion_display_name, potion_vote_entries
 from game.state import GameState, IDLE_STATES
 
 logger = logging.getLogger(__name__)
@@ -359,7 +359,17 @@ class TwitchBot(commands.Bot):
 
                 if isinstance(event, GameStartedEvent):
                     logger.info("Game started: %s", event.state.summary())
-                    await self._chat("A new run has started! Type !<choice> to vote when prompted.")
+                    try:
+                        await broadcaster.send_announcement(
+                            moderator=self.bot_id,
+                            message="A new run has started! Type !<choice> to vote when prompted.",
+                            color="purple",
+                        )
+                    except twitchio.HTTPException as exc:
+                        logger.warning(
+                            "GameStarted: send_announcement failed (%s) — falling back to chat message.", exc
+                        )
+                        await self._chat("A new run has started! Type !<choice> to vote when prompted.")
                 elif isinstance(event, GameEndedEvent):
                     logger.info("Game ended: %s", event.state.summary())
                     await self._chat("Run over! Thanks for playing.")
@@ -522,6 +532,17 @@ class TwitchBot(commands.Bot):
                 return
 
         vote_state = pre_vote_state if pre_vote_state is not None else event.state
+
+        # Event options may not be populated immediately after room transition — retry briefly.
+        if vote_state.state_type == "event" and not vote_state.event_options:
+            for _ in range(3):
+                await asyncio.sleep(0.5)
+                fresh = await self._fetch_parsed_state()
+                if fresh and fresh.event_options:
+                    vote_state = fresh
+                    break
+            else:
+                logger.warning("Event state has no options after retries — falling back to static options")
         winner = await self.vote_manager.run_window(
             broadcaster=broadcaster,
             bot_id=self.bot_id,
@@ -870,9 +891,49 @@ class TwitchBot(commands.Bot):
             duration=duration,
         )
 
+    async def _handle_belt_full_potion_discard(self, state: GameState, potion_item: dict) -> str:
+        """Vote to discard a held potion to claim a belt-full potion reward, or skip it.
+
+        Returns "skip" if chat skips, or the winning "dN" tag otherwise.
+        On a discard win, executes the discard and claims the reward before returning.
+        """
+        _, discard_entries = potion_vote_entries(state)
+        options = [tag for tag, _ in discard_entries] + ["skip"]
+        labels = {tag: name for tag, name in discard_entries}
+        labels["skip"] = "Skip potion reward"
+        reward_name = potion_item.get("description") or "potion"
+        preamble = f"Belt full! Discard a potion to claim {reward_name}, or !skip to pass."
+
+        winner = await self.vote_manager.run_window(
+            broadcaster=self.broadcaster,
+            bot_id=self.bot_id,
+            options=options,
+            state_summary="rewards belt-full discard",
+            labels=labels,
+            preamble=preamble,
+        )
+
+        if winner == "skip":
+            logger.info("Belt-full discard: skipping potion reward")
+            return "skip"
+
+        potion_action = parse_potion_winner(winner)
+        if potion_action and potion_action[0] == "discard":
+            slot = potion_action[1]
+            result = await self._game_client.post_action({"action": "discard_potion", "slot": slot})
+            logger.info("Belt-full discard: discarded slot %d → %s", slot, result)
+            await asyncio.sleep(self._auto_proceed_delay)
+            result = await self._game_client.post_action(
+                {"action": "claim_reward", "index": potion_item["index"]}
+            )
+            logger.info("Belt-full discard: claimed potion reward → %s", result)
+
+        return winner
+
     async def _handle_rewards(self) -> None:
         """Auto-claim gold/relic/potion rewards, open card rewards for a chat vote, then proceed."""
         _VOTE_TYPES = {"card", "special_card", "card_removal"}
+        skipped_indices: set[int] = set()
 
         while True:
             fresh_data = await self._game_client.get_state()
@@ -888,10 +949,17 @@ class TwitchBot(commands.Bot):
                 logger.info("Rewards: state moved to '%s' — done", state.state_type)
                 return
 
-            auto_item = next((i for i in state.rewards_items if i.get("type") not in _VOTE_TYPES), None)
-            vote_item = next((i for i in state.rewards_items if i.get("type") in _VOTE_TYPES), None)
+            available = [i for i in state.rewards_items if i.get("index") not in skipped_indices]
+            auto_item = next((i for i in available if i.get("type") not in _VOTE_TYPES), None)
+            vote_item = next((i for i in available if i.get("type") in _VOTE_TYPES), None)
 
             if auto_item:
+                if auto_item.get("type") == "potion" and len(state.player_potions) >= self._max_belt_size:
+                    winner = await self._handle_belt_full_potion_discard(state, auto_item)
+                    if winner == "skip":
+                        skipped_indices.add(auto_item["index"])
+                    continue
+
                 await asyncio.sleep(self._auto_proceed_delay)
                 result = await self._game_client.post_action({"action": "claim_reward", "index": auto_item["index"]})
                 logger.info("Auto-claimed %s reward → %s", auto_item.get("type"), result)
