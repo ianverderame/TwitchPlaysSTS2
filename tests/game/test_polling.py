@@ -78,6 +78,14 @@ async def test_transition_to_game_over_emits_game_ended():
     assert any(isinstance(e, GameEndedEvent) for e in events)
 
 
+async def test_transition_combat_to_overlay_emits_game_ended():
+    """Player death often manifests as combat → overlay, not combat → game_over."""
+    q: asyncio.Queue = asyncio.Queue()
+    client = _make_client([_api_response("monster"), _api_response("overlay")])
+    events = await _drain(client, q)
+    assert any(isinstance(e, GameEndedEvent) for e in events)
+
+
 async def test_transition_to_new_actionable_state_emits_vote_needed():
     q: asyncio.Queue = asyncio.Queue()
     client = _make_client([_api_response("monster"), _api_response("card_reward")])
@@ -144,3 +152,17 @@ async def test_combat_new_round_detected_by_battle_round_increment():
     events = await _drain(client, q)
     vote_events = [e for e in events if isinstance(e, VoteNeededEvent)]
     assert len(vote_events) >= 2  # initial + new round
+
+
+async def test_combat_to_overlay_during_mid_turn_recheck_emits_game_ended():
+    """Death detected via mid-turn recheck path (card played → recheck → overlay)."""
+    q: asyncio.Queue = asyncio.Queue()
+    # r1: initial monster state with 2 cards in hand
+    r1 = _api_response("monster", battle={"is_play_phase": True, "round": 1, "enemies": [], "hand": ["a", "b"]})
+    # r2: same state but hand shrunk → triggers mid-turn recheck loop
+    r2 = _api_response("monster", battle={"is_play_phase": True, "round": 1, "enemies": [], "hand": ["a"]})
+    # r3: overlay — player died; detected during recheck
+    r3 = _api_response("overlay")
+    client = _make_client([r1, r2, r3])
+    events = await _drain(client, q)
+    assert any(isinstance(e, GameEndedEvent) for e in events)

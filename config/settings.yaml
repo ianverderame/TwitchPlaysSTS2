@@ -18,6 +18,9 @@ game:
   mid_turn_recheck_attempts: 5       # Extra polls after a card play / potion to catch immediate state changes
   mid_turn_recheck_interval_seconds: 0.5
   action_retry_count: 1              # How many times to retry a failed action POST
+  end_game_screen_pause_seconds: 5   # Pause on each post-run screen (you are slain, report) before proceeding
+  new_game_countdown_seconds: 30     # Wait after returning to menu before starting the next-run character vote
+  timeline_epoch_claim_delay_seconds: 5  # Pause between timeline epoch claims so viewers can read rewards
 
 api:
   sts2mcp_base_url: ""     # Required — set STS2MCP_BASE_URL in .env
