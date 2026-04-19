@@ -35,8 +35,8 @@ def test_parse_potion_winner_single_char_returns_none():
 
 # --- Combat options ---
 
-def _potion(slot: int, name: str, target_type: str = "Self", in_combat: bool = True) -> dict:
-    return {"slot": slot, "name": name, "target_type": target_type, "can_use_in_combat": in_combat}
+def _potion(slot: int, name: str, target_type: str = "Self", in_combat: bool = True, potion_id: str = "") -> dict:
+    return {"slot": slot, "id": potion_id, "name": name, "target_type": target_type, "can_use_in_combat": in_combat}
 
 
 def test_combat_options_from_playable_indices():
@@ -197,6 +197,41 @@ def test_relic_select_options_include_skip():
     assert "1" in opts
     assert "2" in opts
     assert "skip" in opts
+
+
+# --- Foul Potion at shop / fake_merchant ---
+
+def test_shop_allows_foul_potion():
+    potions = [_potion(0, "Foul Potion", target_type="AnyEnemy", potion_id="FOUL_POTION")]
+    state = make_state("shop", player_potions=potions)
+    opts = options_for_state(state)
+    assert "p1" in opts
+
+
+def test_fake_merchant_allows_foul_potion():
+    potions = [_potion(0, "Foul Potion", target_type="AnyEnemy", potion_id="FOUL_POTION")]
+    state = make_state("fake_merchant", player_potions=potions)
+    opts = options_for_state(state)
+    assert "p1" in opts
+
+
+def test_shop_blocks_other_any_enemy_potions():
+    potions = [_potion(0, "Fire Potion", target_type="AnyEnemy", potion_id="FIRE_POTION")]
+    state = make_state("shop", player_potions=potions)
+    opts = options_for_state(state)
+    assert "p1" not in opts
+
+
+def test_out_of_combat_foul_potion_blocked_outside_merchant_states():
+    potions = [_potion(0, "Foul Potion", target_type="AnyEnemy", potion_id="FOUL_POTION")]
+    state = make_state("rewards", player_potions=potions)
+    opts = options_for_state(state)
+    assert "p1" not in opts
+
+
+def test_fake_merchant_post_fight_end_only():
+    state = make_state("fake_merchant", shop_items=[])
+    assert options_for_state(state) == ["end"]
 
 
 # --- Unknown state fallback ---

@@ -12,7 +12,7 @@ from game.api_client import STS2Client
 from game.events import GameEndedEvent, GameEvent, GameStartedEvent, MenuSelectNeededEvent, VoteNeededEvent
 from game.menu_client import MenuClient
 from game.labels import MAP_ROOM_LABELS, labels_for_state, preamble_for_state, target_labels_for_enemies
-from game.options import options_for_state, parse_potion_winner, potion_display_name, potion_vote_entries
+from game.options import _FOUL_POTION_ID, options_for_state, parse_potion_winner, potion_display_name, potion_vote_entries
 from game.state import GameState, IDLE_STATES
 
 logger = logging.getLogger(__name__)
@@ -592,6 +592,9 @@ class TwitchBot(commands.Bot):
                 slot = potion_action[1]
                 potion = next((p for p in state.player_potions if p.get("slot") == slot), None)
                 if potion and potion.get("target_type") == "AnyEnemy":
+                    # Foul Potion at shop/fake_merchant targets the merchant — no vote needed.
+                    if potion.get("id") == _FOUL_POTION_ID and state.state_type in ("shop", "fake_merchant"):
+                        return None
                     return await self._run_target_vote(broadcaster, potion_display_name(potion), state.enemies)
         return None
 
