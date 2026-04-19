@@ -938,6 +938,7 @@ class TwitchBot(commands.Bot):
         """Auto-claim gold/relic/potion rewards, open card rewards for a chat vote, then proceed."""
         _VOTE_TYPES = {"card", "special_card", "card_removal"}
         skipped_indices: set[int] = set()
+        attempted_potion_indices: set[int] = set()
 
         while True:
             fresh_data = await self._game_client.get_state()
@@ -958,14 +959,28 @@ class TwitchBot(commands.Bot):
             vote_item = next((i for i in available if i.get("type") in _VOTE_TYPES), None)
 
             if auto_item:
+                idx = auto_item["index"]
+                is_potion = auto_item.get("type") == "potion"
+
+                # Detect silent belt-full failure: API returned ok but reward still present
+                if is_potion and idx in attempted_potion_indices:
+                    logger.info("Rewards: potion claim returned ok but reward persists — belt is full, triggering discard vote")
+                    attempted_potion_indices.discard(idx)
+                    winner = await self._handle_belt_full_potion_discard(state, auto_item)
+                    if winner == "skip":
+                        skipped_indices.add(idx)
+                    continue
+
                 await asyncio.sleep(self._auto_proceed_delay)
-                result = await self._game_client.post_action({"action": "claim_reward", "index": auto_item["index"]})
-                if result is None and auto_item.get("type") == "potion":
+                result = await self._game_client.post_action({"action": "claim_reward", "index": idx})
+                if result is None and is_potion:
                     logger.info("Rewards: potion claim failed — belt may be full, triggering discard vote")
                     winner = await self._handle_belt_full_potion_discard(state, auto_item)
                     if winner == "skip":
-                        skipped_indices.add(auto_item["index"])
+                        skipped_indices.add(idx)
                     continue
+                if is_potion:
+                    attempted_potion_indices.add(idx)
                 logger.info("Auto-claimed %s reward → %s", auto_item.get("type"), result)
                 continue
 
