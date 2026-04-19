@@ -51,6 +51,10 @@ POTION_DISCARD_PREFIX = "d"
 # be used outside combat — even if the potion slot is technically selectable.
 _ENEMY_TARGET_TYPES: frozenset[str] = frozenset({"AnyEnemy", "AllEnemies"})
 
+# The Foul Potion is the only enemy-targeting potion usable at the shop or fake
+# merchant — it initiates a fight with the merchant instead of throwing at a combat enemy.
+_FOUL_POTION_ID = "FOUL_POTION"
+
 
 def potion_display_name(potion: dict) -> str:
     """Human-readable potion name with `Potion N` slot fallback."""
@@ -90,9 +94,11 @@ def potion_vote_entries(state: GameState) -> tuple[list[tuple[str, str]], list[t
             if not p.get("can_use_in_combat", True):
                 continue
         else:
-            # Outside combat there are no enemies — skip potions that require one to throw at
             if target_type in _ENEMY_TARGET_TYPES:
-                continue
+                # Foul Potion can be thrown at the shop or fake merchant to start a fight.
+                # All other enemy-targeting potions require combat and are blocked here.
+                if not (p.get("id") == _FOUL_POTION_ID and state.state_type in ("shop", "fake_merchant")):
+                    continue
         use_entries.append((f"{POTION_USE_PREFIX}{p['slot'] + 1}", potion_display_name(p)))
     discard_entries: list[tuple[str, str]] = (
         [(f"{POTION_DISCARD_PREFIX}{p['slot'] + 1}", potion_display_name(p)) for p in state.player_potions]
