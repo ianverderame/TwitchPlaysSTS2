@@ -294,7 +294,6 @@ class TwitchBot(commands.Bot):
         self._end_game_screen_pause: float = game_cfg.get("end_game_screen_pause_seconds", 5.0)
         self._new_game_countdown: float = game_cfg.get("new_game_countdown_seconds", 30.0)
         self._timeline_epoch_claim_delay: float = game_cfg.get("timeline_epoch_claim_delay_seconds", 5.0)
-        self._max_belt_size: int = config.get("potions", {}).get("max_belt_size", 3)
         self._menu_initial_retry_attempts: int = menu_cfg.get("initial_query_retry_attempts", 5)
         self._menu_initial_retry_interval: float = menu_cfg.get("initial_query_retry_interval_seconds", 1.0)
         self._menu_transition_retry_attempts: int = menu_cfg.get("transition_retry_attempts", 3)
@@ -478,7 +477,7 @@ class TwitchBot(commands.Bot):
             return True
 
         # Shop/fake_merchant with nothing purchasable — no vote needed
-        if state.state_type in ("shop", "fake_merchant") and options_for_state(state, max_belt_size=self._max_belt_size) == ["end"]:
+        if state.state_type in ("shop", "fake_merchant") and options_for_state(state) == ["end"]:
             result = await self._game_client.post_action({"action": "proceed"})
             logger.info("Auto-left shop — nothing purchasable → %s", result)
             return True
@@ -548,7 +547,7 @@ class TwitchBot(commands.Bot):
         winner = await self.vote_manager.run_window(
             broadcaster=broadcaster,
             bot_id=self.bot_id,
-            options=options_for_state(vote_state, max_belt_size=self._max_belt_size),
+            options=options_for_state(vote_state),
             state_summary=vote_state.summary(),
             labels=labels_for_state(vote_state) or None,
             preamble=preamble_for_state(vote_state),
@@ -959,14 +958,14 @@ class TwitchBot(commands.Bot):
             vote_item = next((i for i in available if i.get("type") in _VOTE_TYPES), None)
 
             if auto_item:
-                if auto_item.get("type") == "potion" and len(state.player_potions) >= self._max_belt_size:
+                await asyncio.sleep(self._auto_proceed_delay)
+                result = await self._game_client.post_action({"action": "claim_reward", "index": auto_item["index"]})
+                if result is None and auto_item.get("type") == "potion":
+                    logger.info("Rewards: potion claim failed — belt may be full, triggering discard vote")
                     winner = await self._handle_belt_full_potion_discard(state, auto_item)
                     if winner == "skip":
                         skipped_indices.add(auto_item["index"])
                     continue
-
-                await asyncio.sleep(self._auto_proceed_delay)
-                result = await self._game_client.post_action({"action": "claim_reward", "index": auto_item["index"]})
                 logger.info("Auto-claimed %s reward → %s", auto_item.get("type"), result)
                 continue
 

@@ -34,8 +34,6 @@ KNOWN_STATES: dict[str, list[str]] = {
 }
 
 
-_DEFAULT_MAX_POTION_SLOTS = 3  # STS2 default; may change with certain relics
-
 # States where viewers may want to discard a held potion (e.g. to free belt space
 # before a potion reward or swap at the shop). Combat and map/treasure/card_select
 # screens are excluded — no reason to free a slot mid-fight or mid-selection.
@@ -108,19 +106,16 @@ def potion_vote_entries(state: GameState) -> tuple[list[tuple[str, str]], list[t
     return use_entries, discard_entries
 
 
-def _shop_item_available(item: dict, state: GameState, max_belt_size: int = _DEFAULT_MAX_POTION_SLOTS) -> bool:
+def _shop_item_available(item: dict, state: GameState) -> bool:
     """Return True if a shop item can be meaningfully purchased right now."""
     if not item.get("is_stocked", True):
         return False
     if not item.get("can_afford", True):
         return False
-    # Potions can't be bought when the belt is full
-    if item.get("category") == "potion" and len(state.player_potions) >= max_belt_size:
-        return False
     return True
 
 
-def options_for_state(state: GameState, max_belt_size: int = _DEFAULT_MAX_POTION_SLOTS) -> list[str]:
+def options_for_state(state: GameState) -> list[str]:
     """Return the list of valid vote choices for the given game state.
 
     For combat states (monster/elite/boss), options are derived from the actual
@@ -130,12 +125,12 @@ def options_for_state(state: GameState, max_belt_size: int = _DEFAULT_MAX_POTION
     fallback so voting is never completely blocked. Add new state_types to
     KNOWN_STATES in this module as they are discovered through live testing.
     """
-    base = _base_options_for_state(state, max_belt_size=max_belt_size)
+    base = _base_options_for_state(state)
     use_entries, discard_entries = potion_vote_entries(state)
     return base + [tag for tag, _ in use_entries] + [tag for tag, _ in discard_entries]
 
 
-def _base_options_for_state(state: GameState, max_belt_size: int = _DEFAULT_MAX_POTION_SLOTS) -> list[str]:
+def _base_options_for_state(state: GameState) -> list[str]:
     if state.is_combat_state():
         # Use actual hand positions (1-indexed) so chat options match the in-game card numbers
         numeric = [str(idx + 1) for idx in state.playable_card_indices]
@@ -158,7 +153,7 @@ def _base_options_for_state(state: GameState, max_belt_size: int = _DEFAULT_MAX_
 
     if state.state_type in ("shop", "fake_merchant"):
         # Only offer items that are stocked, affordable, and purchasable given current state
-        available = [i for i in state.shop_items if _shop_item_available(i, state, max_belt_size)]
+        available = [i for i in state.shop_items if _shop_item_available(i, state)]
         if available:
             return [str(i["index"] + 1) for i in available] + ["end"]
         return ["end"]  # no purchasable items — only option is to leave
