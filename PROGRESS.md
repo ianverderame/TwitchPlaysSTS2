@@ -4,6 +4,7 @@
 `PoC`
 
 ## Recently Completed
+- #63 — End-game nav: combat→overlay detection, `_handle_game_ended`, return_to_main_menu, timeline epoch claiming, 30s countdown; live-tested win + loss + epoch unlock
 - #53 — Belt-full potion reward: discard-to-claim vote (`_handle_belt_full_potion_discard`); skip tracking in rewards loop; `_tally` fix (skip never random); event vote retry fix; game-started as announcement
 - #60 — DRY chat-send: `_chat()` helper, `self.broadcaster` cached once, all send sites unified; live-tested
 - #59 — All 7 hardcoded timings/retries promoted to settings.yaml; threaded through loader, clients, polling, options, bot
@@ -14,10 +15,9 @@ None
 
 ## Up Next
 1. #71 — Live test: belt-full potion discard-to-claim + session untested changes
-2. #63 — End-game screen navigation (victory, defeat, unlocks)
-3. #7 — Database Logging
-4. #61 — Bundled minor code-hygiene cleanups
-5. #68 — Streaming setup & run logistics: OBS config, STS2 mod wiring, launch checklist
+2. #7 — Database Logging
+3. #61 — Bundled minor code-hygiene cleanups
+4. #68 — Streaming setup & run logistics: OBS config, STS2 mod wiring, launch checklist
 
 ## Key Decisions
 - Bot and game run on same PC (localhost API)

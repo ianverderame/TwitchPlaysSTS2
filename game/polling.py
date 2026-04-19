@@ -92,6 +92,10 @@ async def poll_game_state(
                         event_queue.put_nowait(GameStartedEvent(state))
                     elif state.state_type == "game_over":
                         event_queue.put_nowait(GameEndedEvent(state))
+                    elif previous_state.is_combat_state() and state.state_type == "overlay":
+                        # Player died — defeat screen appears as overlay before/instead of game_over
+                        logger.info("Combat ended in overlay — treating as game ended")
+                        event_queue.put_nowait(GameEndedEvent(state))
                     elif state.state_type == "menu":
                         logger.info("Game is at main menu — queuing character select vote")
                         event_queue.put_nowait(MenuSelectNeededEvent())
@@ -171,6 +175,9 @@ async def poll_game_state(
                                 )
                                 if recheck_state.requires_player_input():
                                     event_queue.put_nowait(VoteNeededEvent(recheck_state))
+                                elif state.is_combat_state() and recheck_state.state_type == "overlay":
+                                    logger.info("Combat ended in overlay after card play — treating as game ended")
+                                    event_queue.put_nowait(GameEndedEvent(recheck_state))
                             else:
                                 logger.info(
                                     "Mid-turn change (hand %s → %s, potions %d → %d) — re-queuing vote",

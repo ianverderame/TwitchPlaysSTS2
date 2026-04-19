@@ -291,6 +291,9 @@ class TwitchBot(commands.Bot):
         self._rest_site_poll_attempts: int = game_cfg.get("rest_site_poll_attempts", 10)
         self._rest_site_poll_interval: float = game_cfg.get("rest_site_poll_interval_seconds", 1.0)
         self._action_retry_count: int = game_cfg.get("action_retry_count", 1)
+        self._end_game_screen_pause: float = game_cfg.get("end_game_screen_pause_seconds", 5.0)
+        self._new_game_countdown: float = game_cfg.get("new_game_countdown_seconds", 30.0)
+        self._timeline_epoch_claim_delay: float = game_cfg.get("timeline_epoch_claim_delay_seconds", 5.0)
         self._max_belt_size: int = config.get("potions", {}).get("max_belt_size", 3)
         self._menu_initial_retry_attempts: int = menu_cfg.get("initial_query_retry_attempts", 5)
         self._menu_initial_retry_interval: float = menu_cfg.get("initial_query_retry_interval_seconds", 1.0)
@@ -371,8 +374,7 @@ class TwitchBot(commands.Bot):
                         )
                         await self._chat("A new run has started! Type !<choice> to vote when prompted.")
                 elif isinstance(event, GameEndedEvent):
-                    logger.info("Game ended: %s", event.state.summary())
-                    await self._chat("Run over! Thanks for playing.")
+                    await self._handle_game_ended(event)
                 elif isinstance(event, MenuSelectNeededEvent):
                     await self._handle_menu_select(broadcaster)
                 elif isinstance(event, VoteNeededEvent) and event.state.state_type == "rewards":
@@ -976,6 +978,90 @@ class TwitchBot(commands.Bot):
             logger.info("Auto-proceeded from rewards → %s", result)
             return
 
+    async def _handle_game_ended(self, event: GameEndedEvent) -> None:
+        """Send end-of-run announcement, navigate post-run screens back to menu, then announce countdown."""
+        logger.info("Game ended: %s", event.state.summary())
+        await self._chat("Run over! Thanks for playing.")
+
+        # Navigate defeat/victory/unlock screens back to menu.
+        # STS2MCP has no action for overlay/game-over screens; MenuControl handles them.
+        for attempt in range(20):  # cap at 20 attempts to avoid an infinite loop
+            await asyncio.sleep(self._end_game_screen_pause)
+            raw = await self._game_client.get_state()
+            if raw is None:
+                logger.warning("Post-run navigator: lost connection to game API — stopping")
+                return
+            state = GameState.from_api_response(raw)
+            if state.state_type == "menu":
+                logger.info("Post-run navigator: reached menu after %d attempt(s)", attempt)
+                menu_data = await self._menu_client.get_menu_state()
+                screen = (menu_data or {}).get("screen", "UNKNOWN")
+                available = (menu_data or {}).get("available_actions", [])
+                if screen == "TIMELINE":
+                    logger.info("Post-run navigator: timeline pending after return to menu — navigating")
+                    await self._navigate_timeline_screen(menu_data or {})
+                elif "open_timeline" in available:
+                    logger.info("Post-run navigator: opening timeline from main menu to claim pending epochs")
+                    await self._menu_client.post_menu_action("open_timeline")
+                    timeline_data = await self._menu_client.get_menu_state()
+                    await self._navigate_main_menu_timeline(timeline_data or {})
+                break
+            menu_data = await self._menu_client.get_menu_state()
+            screen = (menu_data or {}).get("screen", "UNKNOWN")
+            overlay_data = raw.get("overlay") or {}
+            logger.info(
+                "Post-run navigator: state_type=%r menu_screen=%r overlay=%r (attempt %d)",
+                state.state_type,
+                screen,
+                overlay_data,
+                attempt + 1,
+            )
+            if screen == "TIMELINE":
+                await self._navigate_timeline_screen(menu_data or {})
+            elif screen == "GAME_OVER":
+                await self._menu_client.post_menu_action("return_to_main_menu")
+            else:
+                logger.info("Post-run navigator: waiting on screen=%r", screen)
+        else:
+            logger.warning("Post-run navigator: did not reach menu after 20 attempts — giving up")
+            return
+
+        countdown = int(self._new_game_countdown)
+        await self._chat(f"New game starting in {countdown}s — get ready to vote!")
+        await asyncio.sleep(self._new_game_countdown)
+        # MenuSelectNeededEvent was queued by polling when state hit 'menu'; it runs next in the event runner.
+
+    async def _navigate_timeline_screen(self, menu_data: dict) -> None:
+        """Click through each epoch on the timeline unlock screen, then confirm."""
+        epochs = menu_data.get("epochs", [])
+        logger.info("Post-run navigator: timeline — %d epoch(s) to process", len(epochs))
+        for epoch in epochs:
+            idx = epoch["index"]
+            logger.info(
+                "Post-run navigator: clicking epoch %d (state=%r)", idx, epoch.get("state")
+            )
+            await self._menu_client.post_menu_action("choose_timeline_epoch", option_index=idx)
+            await asyncio.sleep(self._timeline_epoch_claim_delay)
+            # Close the per-epoch inspect overlay that opens after clicking
+            await self._menu_client.post_menu_action("confirm_timeline_overlay")
+            await asyncio.sleep(self._timeline_epoch_claim_delay)
+        # Final confirm for the unlock confirmation button that appears after all epochs are viewed
+        logger.info("Post-run navigator: final confirm_timeline_overlay")
+        await self._menu_client.post_menu_action("confirm_timeline_overlay")
+
+    async def _navigate_main_menu_timeline(self, menu_data: dict) -> None:
+        """Claim all Obtained epochs from the main menu timeline, then close."""
+        epochs = menu_data.get("epochs", [])
+        obtained = [e for e in epochs if e.get("state") != "Complete"]
+        logger.info("Main menu timeline: %d epoch(s) to claim (states: %s)", len(obtained), [e.get("state") for e in obtained])
+        for epoch in obtained:
+            idx = epoch["index"]
+            logger.info("Main menu timeline: claiming epoch %d", idx)
+            await self._menu_client.post_menu_action("choose_timeline_epoch", option_index=idx)
+            await asyncio.sleep(self._timeline_epoch_claim_delay)
+        await self._menu_client.post_menu_action("close_main_menu_submenu")
+        logger.info("Main menu timeline: closed, returning to main menu")
+
     async def _handle_menu_select(self, broadcaster: twitchio.PartialUser) -> None:
         """Handle a MenuSelectNeededEvent: navigate to character select, run vote, embark."""
         # Retry initial query — MenuControl may still be initializing when STS2MCP first reports menu
@@ -991,6 +1077,13 @@ class TwitchBot(commands.Bot):
 
         screen = menu_data.get("screen", "UNKNOWN")
         available_actions = menu_data.get("available_actions", [])
+
+        if screen == "TIMELINE":
+            logger.info("MenuControl: timeline pending at startup — navigating before character select")
+            await self._navigate_main_menu_timeline(menu_data)
+            menu_data = await self._menu_client.get_menu_state() or {}
+            screen = menu_data.get("screen", "UNKNOWN")
+            available_actions = menu_data.get("available_actions", [])
 
         if screen == "MAIN_MENU":
             if "open_character_select" not in available_actions:
