@@ -3,7 +3,8 @@ import logging
 
 from game.api_client import STS2Client
 from game.events import GameEndedEvent, GameStartedEvent, GameEvent, MenuSelectNeededEvent, VoteNeededEvent
-from game.state import GameState
+from game.options import KNOWN_STATES
+from game.state import GameState, IDLE_STATES
 
 logger = logging.getLogger(__name__)
 
@@ -22,21 +23,18 @@ def _log_within_state_changes(prev: GameState, curr: GameState) -> None:
     if curr.player_energy != prev.player_energy and curr.player_energy is not None:
         logger.info("Player energy: %s → %s", prev.player_energy, curr.player_energy)
 
-    for i, enemy in enumerate(curr.enemies):
-        if i >= len(prev.enemies):
-            break
-        prev_enemy = prev.enemies[i]
+    for prev_enemy, enemy in zip(prev.enemies, curr.enemies):
         if enemy.get("hp") != prev_enemy.get("hp"):
             logger.info(
                 "%s HP: %s → %s",
-                enemy.get("name", f"Enemy {i}"),
+                enemy.get("name", prev_enemy.get("name", "Enemy")),
                 prev_enemy.get("hp"),
                 enemy.get("hp"),
             )
         if enemy.get("block") != prev_enemy.get("block"):
             logger.info(
                 "%s block: %s → %s",
-                enemy.get("name", f"Enemy {i}"),
+                enemy.get("name", prev_enemy.get("name", "Enemy")),
                 prev_enemy.get("block"),
                 enemy.get("block"),
             )
@@ -66,12 +64,7 @@ async def poll_game_state(
                     logger.info("STS2MCP API reconnected")
                     api_reachable = True
                 state = GameState.from_api_response(data)
-                if state.state_type not in {
-                    "menu", "monster", "elite", "boss", "map", "event", "rest_site",
-                    "shop", "fake_merchant", "card_reward", "rewards", "treasure",
-                    "hand_select", "card_select", "bundle_select", "relic_select",
-                    "crystal_sphere", "game_over", "unknown", "overlay",
-                }:
+                if state.state_type not in KNOWN_STATES.keys() | IDLE_STATES:
                     logger.info("UNKNOWN STATE: type=%s keys=%s", state.state_type, list(data.keys()))
 
                 if previous_state is None:

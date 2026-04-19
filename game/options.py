@@ -106,7 +106,7 @@ def potion_vote_entries(state: GameState) -> tuple[list[tuple[str, str]], list[t
     return use_entries, discard_entries
 
 
-def _shop_item_available(item: dict, state: GameState) -> bool:
+def shop_item_available(item: dict, state: GameState) -> bool:
     """Return True if a shop item can be meaningfully purchased right now."""
     if not item.get("is_stocked", True):
         return False
@@ -153,7 +153,7 @@ def _base_options_for_state(state: GameState) -> list[str]:
 
     if state.state_type in ("shop", "fake_merchant"):
         # Only offer items that are stocked, affordable, and purchasable given current state
-        available = [i for i in state.shop_items if _shop_item_available(i, state)]
+        available = [i for i in state.shop_items if shop_item_available(i, state)]
         if available:
             return [str(i["index"] + 1) for i in available] + ["end"]
         return ["end"]  # no purchasable items — only option is to leave

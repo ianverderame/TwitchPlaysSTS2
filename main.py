@@ -37,9 +37,23 @@ async def main() -> None:
     if dry_run:
         logger.warning("DRY RUN MODE — actions will be logged but NOT sent to the game API")
 
-    http_timeout = config["api"].get("http_timeout_seconds", 5.0)
-    game_client = STS2Client(config["api"]["sts2mcp_base_url"], dry_run=dry_run, http_timeout=http_timeout)
-    menu_client = MenuClient(config["api"]["sts2_menu_base_url"], http_timeout=http_timeout)
+    api_cfg = config["api"]
+    http_timeout = api_cfg.get("http_timeout_seconds", 5.0)
+    http_retry_attempts = api_cfg.get("http_retry_attempts", 3)
+    http_retry_backoff = api_cfg.get("http_retry_backoff_seconds", 0.5)
+    game_client = STS2Client(
+        api_cfg["sts2mcp_base_url"],
+        dry_run=dry_run,
+        http_timeout=http_timeout,
+        http_retry_attempts=http_retry_attempts,
+        http_retry_backoff_seconds=http_retry_backoff,
+    )
+    menu_client = MenuClient(
+        api_cfg["sts2_menu_base_url"],
+        http_timeout=http_timeout,
+        http_retry_attempts=http_retry_attempts,
+        http_retry_backoff_seconds=http_retry_backoff,
+    )
 
     state = await game_client.get_state()
     if state is not None:

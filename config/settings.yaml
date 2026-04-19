@@ -19,13 +19,16 @@ game:
   mid_turn_recheck_interval_seconds: 0.5
   action_retry_count: 1              # How many times to retry a failed action POST
   end_game_screen_pause_seconds: 5   # Pause on each post-run screen (you are slain, report) before proceeding
+  end_game_screen_max_nav_attempts: 20  # Max attempts to navigate post-run screens back to menu
   new_game_countdown_seconds: 30     # Wait after returning to menu before starting the next-run character vote
   timeline_epoch_claim_delay_seconds: 5  # Pause between timeline epoch claims so viewers can read rewards
 
 api:
   sts2mcp_base_url: ""     # Required — set STS2MCP_BASE_URL in .env
   sts2_menu_base_url: ""   # Required — set STS2_MENU_BASE_URL in .env
-  http_timeout_seconds: 5.0  # HTTP client timeout for all game/menu API calls
+  http_timeout_seconds: 5.0        # HTTP client timeout for all game/menu API calls
+  http_retry_attempts: 3           # Retries on transient failures (ConnectError/Timeout); 0 to disable
+  http_retry_backoff_seconds: 0.5  # Initial backoff between retries; doubles each attempt
 
 menu:
   initial_query_retry_attempts: 5     # Retries when MenuControl may still be initializing
@@ -37,6 +40,3 @@ logging:
   level: "INFO"             # Bot log level (DEBUG, INFO, WARNING, ERROR)
   twitchio_level: "WARNING" # Suppress verbose TwitchIO output
   httpx_level: "WARNING"    # Suppress verbose httpx output
-
-database:
-  path: "data/game_history.db"
