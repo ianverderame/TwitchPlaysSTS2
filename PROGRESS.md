@@ -11,13 +11,13 @@
 - #62 — 165-test suite: state/actions/options/labels/polling/api_client/vote_manager; runs via `python -m pytest`, no live deps
 - #77 — fake_merchant: Foul Potion allowed at shop/fake_merchant (no target vote; API auto-infers merchant); 191 tests
 - #76 — Remove max_belt_size config: deleted `potions:` from settings/loader, dropped belt-full pre-check in `_shop_item_available`, rewards now attempt-then-react; STS2MCP feature request filed ([#72](https://github.com/Gennadiyev/STS2MCP/issues/72)); live-tested shop with full belt; 191 tests
+- #71 — Belt-full live test: fixed infinite-retry bug (API returns ok on full belt); `attempted_potion_indices` detects silent failure; live-tested discard-to-claim and skip paths; 191 tests
 
 ## Active Issue
 None
 
 ## Up Next
-1. #71 — Live test: belt-full potion discard-to-claim + session untested changes (includes #76 rewards behavior)
-2. #75 — Pre-ship hardening & code cleanup (consolidated from #9 + #61)
+1. #75 — Pre-ship hardening & code cleanup (consolidated from #9 + #61)
 3. #54 — Potion edge cases: combat-only filter (Foul Potion at shop/fake_merchant now resolved in #77)
 
 ## Key Decisions
