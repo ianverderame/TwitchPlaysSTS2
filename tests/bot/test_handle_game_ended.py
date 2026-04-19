@@ -47,6 +47,7 @@ def _make_bot_self(
     """
     bot = MagicMock(spec=TwitchBot)
     bot._end_game_screen_pause = 0.0
+    bot._end_game_screen_max_nav_attempts = 20
     bot._new_game_countdown = new_game_countdown
     bot._timeline_epoch_claim_delay = 0.0
 

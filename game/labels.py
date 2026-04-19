@@ -1,6 +1,6 @@
 import logging
 
-from game.options import _shop_item_available, potion_vote_entries
+from game.options import shop_item_available, potion_vote_entries
 from game.state import GameState
 
 logger = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ def _base_labels_for_state(state: GameState) -> dict[str, str]:
         }
 
     if state.state_type in ("shop", "fake_merchant") and state.shop_items:
-        stocked = [i for i in state.shop_items if _shop_item_available(i, state)]
+        stocked = [i for i in state.shop_items if shop_item_available(i, state)]
         def _shop_label(item: dict) -> str:
             category = item.get("category", "")
             # API uses flat prefixed fields: card_name, relic_name, potion_name

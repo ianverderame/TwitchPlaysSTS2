@@ -90,16 +90,7 @@ def build_api_body(state: GameState, winner: str, target_entity_id: str | None =
         except ValueError:
             pass
 
-    elif st == "shop":
-        if winner == "end":
-            return {"action": "proceed"}
-        try:
-            idx = int(winner) - 1
-            return {"action": "shop_purchase", "index": idx}
-        except ValueError:
-            pass
-
-    elif st == "fake_merchant":
+    elif st in ("shop", "fake_merchant"):
         if winner == "end":
             return {"action": "proceed"}
         try:
@@ -149,6 +140,9 @@ def build_api_body(state: GameState, winner: str, target_entity_id: str | None =
     elif st == "crystal_sphere":
         try:
             idx = int(winner) - 1
+        except ValueError:
+            pass
+        else:
             cells = state.crystal_sphere_cells
             if not cells:
                 raise ValueError("crystal_sphere_cells is empty — cannot resolve coordinates")
@@ -158,10 +152,6 @@ def build_api_body(state: GameState, winner: str, target_entity_id: str | None =
                 )
             cell = cells[idx]
             return {"action": "crystal_sphere_click_cell", "x": cell["x"], "y": cell["y"]}
-        except (ValueError, KeyError) as exc:
-            raise ValueError(
-                f"crystal_sphere action failed for winner={winner!r}: {exc}"
-            ) from exc
 
     raise ValueError(
         f"No API mapping for state_type={st!r}, winner={winner!r}. "

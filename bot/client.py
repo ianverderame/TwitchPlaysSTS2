@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+from collections.abc import Callable
 
 import twitchio
 from twitchio import eventsub
@@ -18,6 +19,7 @@ from game.state import GameState, IDLE_STATES
 logger = logging.getLogger(__name__)
 
 _WIKI_BASE = "https://slaythespire.wiki.gg/wiki/Slay_the_Spire_2:"
+_REWARD_VOTE_TYPES: frozenset[str] = frozenset({"card", "special_card", "card_removal"})
 
 
 def _chunk_card_list(
@@ -292,6 +294,7 @@ class TwitchBot(commands.Bot):
         self._rest_site_poll_interval: float = game_cfg.get("rest_site_poll_interval_seconds", 1.0)
         self._action_retry_count: int = game_cfg.get("action_retry_count", 1)
         self._end_game_screen_pause: float = game_cfg.get("end_game_screen_pause_seconds", 5.0)
+        self._end_game_screen_max_nav_attempts: int = game_cfg.get("end_game_screen_max_nav_attempts", 20)
         self._new_game_countdown: float = game_cfg.get("new_game_countdown_seconds", 30.0)
         self._timeline_epoch_claim_delay: float = game_cfg.get("timeline_epoch_claim_delay_seconds", 5.0)
         self._menu_initial_retry_attempts: int = menu_cfg.get("initial_query_retry_attempts", 5)
@@ -301,6 +304,7 @@ class TwitchBot(commands.Bot):
 
         self.broadcaster: twitchio.PartialUser | None = None
         self._ready = asyncio.Event()  # set in event_ready; gates _event_runner
+        self._connected_once = False   # guards against double-announce on TwitchIO reconnect
 
         super().__init__(
             client_id=config["twitch"]["client_id"],
@@ -334,12 +338,16 @@ class TwitchBot(commands.Bot):
         )
 
     async def event_ready(self) -> None:
-        logger.info("Connected to Twitch as %s", self.user)
         users = await self.fetch_users(ids=[self._owner_id])
         self.broadcaster = users[0]
-        message = "[DRY RUN] Bot is online — votes run but actions are NOT sent to the game." if self._game_client.dry_run else "Bot is online!"
-        await self._chat(message)
-        self._ready.set()
+        if not self._connected_once:
+            self._connected_once = True
+            logger.info("Connected to Twitch as %s", self.user)
+            message = "[DRY RUN] Bot is online — votes run but actions are NOT sent to the game." if self._game_client.dry_run else "Bot is online!"
+            await self._chat(message)
+            self._ready.set()
+        else:
+            logger.info("Reconnected to Twitch as %s", self.user)
 
     async def event_command_error(self, payload: commands.CommandErrorPayload) -> None:
         # !1, !end, !left, etc. are not registered commands — silence the noise.
@@ -377,7 +385,7 @@ class TwitchBot(commands.Bot):
                 elif isinstance(event, MenuSelectNeededEvent):
                     await self._handle_menu_select(broadcaster)
                 elif isinstance(event, VoteNeededEvent) and event.state.state_type == "rewards":
-                    await self._handle_rewards()
+                    await self._handle_rewards(broadcaster)
                 elif isinstance(event, VoteNeededEvent) and event.state.card_select_screen_type == "select":
                     await self._handle_card_remove_event(event, broadcaster)
                 elif isinstance(event, VoteNeededEvent) and event.state.card_select_screen_type == "upgrade":
@@ -484,43 +492,32 @@ class TwitchBot(commands.Bot):
 
         return False
 
-    async def _handle_card_remove_event(self, event: VoteNeededEvent, broadcaster: twitchio.PartialUser) -> None:
-        """Handle a card_select 'select' (shop card removal) event with fresh state."""
-        remove_data = await self._game_client.get_state()
-        if not remove_data:
-            logger.warning("Card remove: could not fetch fresh state — discarding")
+    async def _handle_deck_select_event(
+        self,
+        broadcaster: twitchio.PartialUser,
+        screen_type: str,
+        context: str,
+        handler: Callable[[twitchio.PartialUser, GameState], object],
+    ) -> None:
+        """Fetch fresh state and dispatch to a card_select handler if screen_type matches."""
+        state = await self._fetch_parsed_state()
+        if state is None:
+            logger.warning("%s: could not fetch fresh state — discarding", context)
             return
-        try:
-            remove_state = GameState.from_api_response(remove_data)
-        except ValueError:
-            logger.warning("Card remove: could not parse fresh state — discarding")
-            return
-        if remove_state.card_select_screen_type == "select":
-            await self._handle_card_remove(broadcaster, remove_state)
+        if state.card_select_screen_type == screen_type:
+            await handler(broadcaster, state)
         else:
             logger.warning(
-                "Card remove: state moved to '%s' before vote started — discarding",
-                remove_state.state_type,
+                "%s: state moved to '%s' before vote started — discarding",
+                context,
+                state.state_type,
             )
 
+    async def _handle_card_remove_event(self, event: VoteNeededEvent, broadcaster: twitchio.PartialUser) -> None:
+        await self._handle_deck_select_event(broadcaster, "select", "Card remove", self._handle_card_remove)
+
     async def _handle_smith_upgrade_event(self, event: VoteNeededEvent, broadcaster: twitchio.PartialUser) -> None:
-        """Handle a card_select 'upgrade' (smith upgrade) event with fresh state."""
-        smith_data = await self._game_client.get_state()
-        if not smith_data:
-            logger.warning("Smith upgrade: could not fetch fresh state — discarding")
-            return
-        try:
-            smith_state = GameState.from_api_response(smith_data)
-        except ValueError:
-            logger.warning("Smith upgrade: could not parse fresh state — discarding")
-            return
-        if smith_state.card_select_screen_type == "upgrade":
-            await self._handle_smith_upgrade(broadcaster, smith_state)
-        else:
-            logger.warning(
-                "Smith upgrade: state moved to '%s' before vote started — discarding",
-                smith_state.state_type,
-            )
+        await self._handle_deck_select_event(broadcaster, "upgrade", "Smith upgrade", self._handle_smith_upgrade)
 
     async def _handle_vote_needed(self, event: VoteNeededEvent, broadcaster: twitchio.PartialUser) -> None:
         """Handle a general VoteNeededEvent: stale-check, auto-proceed, vote, execute."""
@@ -626,7 +623,11 @@ class TwitchBot(commands.Bot):
         action = body.get("action", "")
 
         # shop/fake_merchant: re-queue vote after purchase or potion use
-        if action_state.state_type in ("shop", "fake_merchant") and action in ("shop_purchase", "use_potion") and result is not None:
+        if (
+            action_state.state_type in ("shop", "fake_merchant")
+            and action in ("shop_purchase", "use_potion")
+            and result is not None
+        ):
             post_state = await self._fetch_parsed_state()
             if post_state and post_state.state_type == action_state.state_type:
                 logger.info("Shop purchase complete — re-queuing vote")
@@ -638,7 +639,7 @@ class TwitchBot(commands.Bot):
             if post_state and post_state.requires_player_input():
                 self._event_queue.put_nowait(VoteNeededEvent(post_state))
 
-        # rest_site: after choosing an option, poll until can_proceed=True then decide
+        # State-specific follow-up (mutually exclusive — only one branch fires per call)
         if action_state.state_type == "rest_site" and action == "choose_rest_option":
             for _ in range(self._rest_site_poll_attempts):
                 await asyncio.sleep(self._rest_site_poll_interval)
@@ -666,41 +667,27 @@ class TwitchBot(commands.Bot):
 
         # hand_select: confirm when can_confirm=True, re-queue if more selections needed
         elif action_state.state_type == "hand_select" and action == "combat_select_card":
-            hs_data = await self._game_client.get_state()
-            if not hs_data:
+            hs_state = await self._fetch_parsed_state()
+            if hs_state is None or hs_state.state_type != "hand_select":
                 confirm_result = await self._game_client.post_action({"action": "combat_confirm_selection"})
                 logger.info("Auto-confirmed hand_select (no fresh state) → %s", confirm_result)
+            elif hs_state.hand_select_can_confirm:
+                confirm_result = await self._game_client.post_action({"action": "combat_confirm_selection"})
+                logger.info("Auto-confirmed hand_select → %s", confirm_result)
             else:
-                try:
-                    hs_state = GameState.from_api_response(hs_data)
-                except ValueError:
-                    confirm_result = await self._game_client.post_action({"action": "combat_confirm_selection"})
-                    logger.info("Auto-confirmed hand_select (state parse failed) → %s", confirm_result)
-                else:
-                    if hs_state.state_type == "hand_select":
-                        if hs_state.hand_select_can_confirm:
-                            confirm_result = await self._game_client.post_action({"action": "combat_confirm_selection"})
-                            logger.info("Auto-confirmed hand_select → %s", confirm_result)
-                        else:
-                            logger.info("hand_select: more selections needed — re-queuing vote")
-                            self._event_queue.put_nowait(VoteNeededEvent(hs_state))
+                logger.info("hand_select: more selections needed — re-queuing vote")
+                self._event_queue.put_nowait(VoteNeededEvent(hs_state))
 
         # card_select: re-queue if more selections needed, auto-confirm when ready
         elif action_state.state_type == "card_select" and action == "select_card":
-            cs_data = await self._game_client.get_state()
-            if cs_data:
-                try:
-                    cs_state = GameState.from_api_response(cs_data)
-                except ValueError:
-                    pass
+            cs_state = await self._fetch_parsed_state()
+            if cs_state and cs_state.state_type == "card_select":
+                if cs_state.card_select_can_confirm:
+                    confirm_result = await self._game_client.post_action({"action": "confirm_selection"})
+                    logger.info("Auto-confirmed card_select → %s", confirm_result)
                 else:
-                    if cs_state.state_type == "card_select":
-                        if cs_state.card_select_can_confirm:
-                            confirm_result = await self._game_client.post_action({"action": "confirm_selection"})
-                            logger.info("Auto-confirmed card_select → %s", confirm_result)
-                        else:
-                            logger.info("card_select: more selections needed — re-queuing vote")
-                            self._event_queue.put_nowait(VoteNeededEvent(cs_state))
+                    logger.info("card_select: more selections needed — re-queuing vote")
+                    self._event_queue.put_nowait(VoteNeededEvent(cs_state))
 
         # Dry-run: game state never changes so the poller never fires a new event.
         # Re-queue manually so testing can continue without restarting the bot.
@@ -743,15 +730,8 @@ class TwitchBot(commands.Bot):
         )
 
         # Guard: re-check enemy list after vote (theoretically impossible to change in SP)
-        guard_data = await self._game_client.get_state()
-        current_enemies = enemies
-        if guard_data:
-            try:
-                guard_state = GameState.from_api_response(guard_data)
-                if guard_state.enemies:
-                    current_enemies = guard_state.enemies
-            except ValueError:
-                pass
+        guard_state = await self._fetch_parsed_state()
+        current_enemies = guard_state.enemies if guard_state and guard_state.enemies else enemies
 
         if len(current_enemies) == 1:
             logger.info("Enemy list changed to 1 after target vote — auto-targeting %s", current_enemies[0]["name"])
@@ -850,22 +830,17 @@ class TwitchBot(commands.Bot):
         result = await self._game_client.post_action({"action": "select_card", "index": api_index})
         logger.info("Deck select (%s): '%s' (api_index=%d) → %s", state_summary, winner_label, api_index, result)
 
-        post_data = await self._game_client.get_state()
-        if post_data:
-            try:
-                post_state = GameState.from_api_response(post_data)
-            except ValueError:
-                post_state = None
-            if post_state is not None and post_state.state_type == "card_select":
-                if post_state.card_select_can_confirm:
-                    confirm_result = await self._game_client.post_action({"action": "confirm_selection"})
-                    logger.info("Deck select (%s): confirmed → %s", state_summary, confirm_result)
-                else:
-                    logger.warning(
-                        "Deck select (%s): still in card_select but can_confirm=False — "
-                        "selection may not be committed",
-                        state_summary,
-                    )
+        post_state = await self._fetch_parsed_state()
+        if post_state is not None and post_state.state_type == "card_select":
+            if post_state.card_select_can_confirm:
+                confirm_result = await self._game_client.post_action({"action": "confirm_selection"})
+                logger.info("Deck select (%s): confirmed → %s", state_summary, confirm_result)
+            else:
+                logger.warning(
+                    "Deck select (%s): still in card_select but can_confirm=False — "
+                    "selection may not be committed",
+                    state_summary,
+                )
 
     async def _handle_card_remove(
         self,
@@ -895,7 +870,12 @@ class TwitchBot(commands.Bot):
             duration=duration,
         )
 
-    async def _handle_belt_full_potion_discard(self, state: GameState, potion_item: dict) -> str:
+    async def _handle_belt_full_potion_discard(
+        self,
+        broadcaster: twitchio.PartialUser,
+        state: GameState,
+        potion_item: dict,
+    ) -> str:
         """Vote to discard a held potion to claim a belt-full potion reward, or skip it.
 
         Returns "skip" if chat skips, or the winning "dN" tag otherwise.
@@ -909,7 +889,7 @@ class TwitchBot(commands.Bot):
         preamble = f"Belt full! Discard a potion to claim {reward_name}, or !skip to pass."
 
         winner = await self.vote_manager.run_window(
-            broadcaster=self.broadcaster,
+            broadcaster=broadcaster,
             bot_id=self.bot_id,
             options=options,
             state_summary="rewards belt-full discard",
@@ -934,29 +914,23 @@ class TwitchBot(commands.Bot):
 
         return winner
 
-    async def _handle_rewards(self) -> None:
+    async def _handle_rewards(self, broadcaster: twitchio.PartialUser) -> None:
         """Auto-claim gold/relic/potion rewards, open card rewards for a chat vote, then proceed."""
-        _VOTE_TYPES = {"card", "special_card", "card_removal"}
         skipped_indices: set[int] = set()
         attempted_potion_indices: set[int] = set()
 
         while True:
-            fresh_data = await self._game_client.get_state()
-            if not fresh_data:
-                logger.warning("Rewards: could not fetch fresh state — skipping")
-                return
-            try:
-                state = GameState.from_api_response(fresh_data)
-            except ValueError:
-                logger.warning("Rewards: malformed state response — skipping")
+            state = await self._fetch_parsed_state()
+            if state is None:
+                logger.warning("Rewards: could not fetch or parse state — skipping")
                 return
             if state.state_type != "rewards":
                 logger.info("Rewards: state moved to '%s' — done", state.state_type)
                 return
 
             available = [i for i in state.rewards_items if i.get("index") not in skipped_indices]
-            auto_item = next((i for i in available if i.get("type") not in _VOTE_TYPES), None)
-            vote_item = next((i for i in available if i.get("type") in _VOTE_TYPES), None)
+            auto_item = next((i for i in available if i.get("type") not in _REWARD_VOTE_TYPES), None)
+            vote_item = next((i for i in available if i.get("type") in _REWARD_VOTE_TYPES), None)
 
             if auto_item:
                 idx = auto_item["index"]
@@ -966,7 +940,7 @@ class TwitchBot(commands.Bot):
                 if is_potion and idx in attempted_potion_indices:
                     logger.info("Rewards: potion claim returned ok but reward persists — belt is full, triggering discard vote")
                     attempted_potion_indices.discard(idx)
-                    winner = await self._handle_belt_full_potion_discard(state, auto_item)
+                    winner = await self._handle_belt_full_potion_discard(broadcaster, state, auto_item)
                     if winner == "skip":
                         skipped_indices.add(idx)
                     continue
@@ -975,7 +949,7 @@ class TwitchBot(commands.Bot):
                 result = await self._game_client.post_action({"action": "claim_reward", "index": idx})
                 if result is None and is_potion:
                     logger.info("Rewards: potion claim failed — belt may be full, triggering discard vote")
-                    winner = await self._handle_belt_full_potion_discard(state, auto_item)
+                    winner = await self._handle_belt_full_potion_discard(broadcaster, state, auto_item)
                     if winner == "skip":
                         skipped_indices.add(idx)
                     continue
@@ -1002,13 +976,17 @@ class TwitchBot(commands.Bot):
 
         # Navigate defeat/victory/unlock screens back to menu.
         # STS2MCP has no action for overlay/game-over screens; MenuControl handles them.
-        for attempt in range(20):  # cap at 20 attempts to avoid an infinite loop
+        for attempt in range(self._end_game_screen_max_nav_attempts):
             await asyncio.sleep(self._end_game_screen_pause)
             raw = await self._game_client.get_state()
             if raw is None:
                 logger.warning("Post-run navigator: lost connection to game API — stopping")
                 return
-            state = GameState.from_api_response(raw)
+            try:
+                state = GameState.from_api_response(raw)
+            except ValueError:
+                logger.error("Post-run navigator: failed to parse game state — stopping", exc_info=True)
+                return
             if state.state_type == "menu":
                 logger.info("Post-run navigator: reached menu after %d attempt(s)", attempt)
                 menu_data = await self._menu_client.get_menu_state()
@@ -1040,7 +1018,7 @@ class TwitchBot(commands.Bot):
             else:
                 logger.info("Post-run navigator: waiting on screen=%r", screen)
         else:
-            logger.warning("Post-run navigator: did not reach menu after 20 attempts — giving up")
+            logger.warning("Post-run navigator: did not reach menu after %d attempts — giving up", self._end_game_screen_max_nav_attempts)
             return
 
         countdown = int(self._new_game_countdown)
