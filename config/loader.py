@@ -55,6 +55,5 @@ def load_config() -> dict:
         "vote": settings.get("vote", {}),
         "game": settings.get("game", {}),
         "menu": settings.get("menu", {}),
-        "potions": settings.get("potions", {}),
         "logging": settings.get("logging", {}),
     }

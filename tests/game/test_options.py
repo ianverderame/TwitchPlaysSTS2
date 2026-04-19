@@ -132,15 +132,6 @@ def test_shop_filters_out_of_stock():
     assert "end" in opts
 
 
-def test_shop_filters_potion_when_belt_full():
-    items = [_shop_item(0, category="potion")]
-    potions = [_potion(0, "A"), _potion(1, "B"), _potion(2, "C")]  # 3 = full belt
-    state = make_state("shop", shop_items=items, player_potions=potions)
-    opts = options_for_state(state)
-    assert "1" not in opts
-    assert "end" in opts
-
-
 def test_shop_end_only_when_nothing_available():
     items = [_shop_item(0, stocked=False)]
     state = make_state("shop", shop_items=items)

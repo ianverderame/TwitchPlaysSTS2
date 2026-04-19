@@ -33,9 +33,6 @@ menu:
   transition_retry_attempts: 3        # Retries waiting for CHARACTER_SELECT after open_character_select
   transition_retry_interval_seconds: 0.5
 
-potions:
-  max_belt_size: 3  # STS2 default belt capacity (until the API exposes it directly)
-
 logging:
   level: "INFO"             # Bot log level (DEBUG, INFO, WARNING, ERROR)
   twitchio_level: "WARNING" # Suppress verbose TwitchIO output
