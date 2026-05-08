@@ -4,9 +4,9 @@
 `PoC`
 
 ## Recently Completed
-- #82 — Vote-start delay: `start_delay_seconds` (default 0) under `vote:` in settings.yaml; set to 6 for stream latency; post-delay stale check prevents wasted vote windows on mid-delay state transitions; 195 tests
+- #84 — max_potion_slots: `player_max_potion_slots` parsed from STS2MCP API into `GameState`; `is_potion_belt_full()` helper on state; proactive belt-full pre-check in `_handle_rewards` skips claim attempt when belt known-full; fallback to attempt-then-react when field absent; 201 tests
+- #82 — Vote-start delay: `start_delay_seconds` (default 0) under `vote:` in settings.yaml; set to 6 for stream latency; post-delay stale check prevents wasted vote windows; 195 tests
 - #77 — fake_merchant: Foul Potion allowed at shop/fake_merchant (no target vote; API auto-infers merchant); 191 tests
-- #76 — Remove max_belt_size config: deleted `potions:` from settings/loader, dropped belt-full pre-check in `shop_item_available`, rewards now attempt-then-react; 191 tests
 - #75 — Pre-ship hardening & code cleanup: all 11 Part B hygiene items + 5 additional findings fixed; httpx retry with exponential backoff (configurable); TwitchIO reconnect guard; 195 tests
 
 ## Active Issue
@@ -22,7 +22,7 @@ None
 - All API URLs required via .env — no hardcoded defaults in committed files
 - Fail loud on missing config at startup
 - Logging at INFO level to terminal + `logs/bot.log` (truncated each run, gitignored)
-- Test suite: `python -m pytest` from project root; 195 tests, no live deps; `bot/client.py` not tested (twitchio mocking complexity)
+- Test suite: `python -m pytest` from project root; 201 tests, no live deps; `bot/client.py` not tested (twitchio mocking complexity)
 - GitHub Issues for all task tracking; Claude can create/label/prioritize autonomously
 - `PROGRESS.md` stays capped at ~20-30 lines; full history lives in GitHub Issues
 - STS2MCP API on `localhost:15526`; enemy `entity_id` lives at `battle.enemies[i].entity_id`

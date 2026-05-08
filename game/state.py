@@ -43,6 +43,7 @@ class GameState:
     card_select_cards: list[dict] = field(default_factory=list)      # card_select.cards (has name)
     shop_items: list[dict] = field(default_factory=list)             # shop.items or fake_merchant.shop.items
     player_potions: list[dict] = field(default_factory=list)         # player.potions (slot, name, target_type, can_use_in_combat, description)
+    player_max_potion_slots: int | None = None                       # player.max_potion_slots (None = old mod version)
 
     @classmethod
     def from_api_response(cls, data: dict) -> "GameState":
@@ -109,7 +110,14 @@ class GameState:
                 or []
             ),
             player_potions=player.get("potions") or [],
+            player_max_potion_slots=player.get("max_potion_slots"),
         )
+
+    def is_potion_belt_full(self) -> bool | None:
+        """Return True if belt is at capacity, False if space remains, None if capacity unknown."""
+        if self.player_max_potion_slots is None:
+            return None
+        return len(self.player_potions) >= self.player_max_potion_slots
 
     def is_combat_state(self) -> bool:
         """Return True when the current state is a combat encounter."""
