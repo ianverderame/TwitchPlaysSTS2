@@ -21,6 +21,39 @@ logger = logging.getLogger(__name__)
 _WIKI_BASE = "https://slaythespire.wiki.gg/wiki/Slay_the_Spire_2:"
 _REWARD_VOTE_TYPES: frozenset[str] = frozenset({"card", "special_card", "card_removal"})
 
+_HELP_TEXT = (
+    "Commands: !N=vote for option N | !pN=play potion N | !dN=discard potion N"
+    " | ?map=map preview | ?p=potion belt | ?N=card in slot N | ((name))=card lookup"
+)
+
+
+def _format_state_announcement(state: GameState) -> str | None:
+    """Return a one-line chat announcement for entering this state, or None to skip.
+
+    Skipped state_types (map, rewards, card_select, etc.) return None so the caller
+    can suppress the announcement without a special-case branch.
+    """
+    if state.is_combat_state():
+        header = "👑 BOSS" if state.state_type == "boss" else "⚔️ Combat"
+        parts = [
+            f"{e.get('name', 'Enemy')} ({e.get('hp', '?')}/{e.get('max_hp', '?')})"
+            for e in state.enemies
+        ]
+        return f"{header} — {', '.join(parts)}" if parts else header
+    st = state.state_type
+    if st in ("shop", "fake_merchant"):
+        gold = state.player_gold if state.player_gold is not None else "?"
+        return f"🛒 Shop — Gold: {gold}"
+    if st == "treasure":
+        return "💎 Treasure room"
+    if st == "relic_select":
+        return "🎁 Relic offered"
+    if st == "rest_site":
+        return "🛌 Rest site"
+    if st == "event":
+        return "❓ Event"
+    return None
+
 
 def _chunk_card_list(
     entries: list[str], max_len: int = 490, separator: str = " | "
@@ -128,10 +161,7 @@ class ChatComponent(commands.Component):
 
     async def _handle_help(self) -> None:
         """Respond to !help with a concise viewer command reference."""
-        await self._send_chat(
-            "Commands: !N=vote | !pN=use potion N | !dN=discard potion N"
-            " | ?map=map preview | ?p/?potions=potion belt | ?N=card in slot N | ((name))=card lookup"
-        )
+        await self._send_chat(_HELP_TEXT)
 
     async def _handle_slot_lookup(self, arg: str) -> None:
         """Respond to ?N with card info for vote slot N from the current hand."""
@@ -307,6 +337,11 @@ class TwitchBot(commands.Bot):
         self._ready = asyncio.Event()  # set in event_ready; gates _event_runner
         self._connected_once = False   # guards against double-announce on TwitchIO reconnect
 
+        # Announcement tracking — reset on GameEndedEvent so each run starts fresh.
+        self._welcome_sent: bool = False
+        self._last_announced_state_key: str | None = None
+        self._last_seen_act: int | None = None
+
         super().__init__(
             client_id=config["twitch"]["client_id"],
             client_secret=config["twitch"]["client_secret"],
@@ -337,6 +372,48 @@ class TwitchBot(commands.Bot):
             sender=self.bot_id,
             token_for=self.bot_id,
         )
+
+    async def _send_run_welcome(self) -> None:
+        """Onboard chat at character-select once per run.
+
+        Fires on the first character-select since bot start or last GameEndedEvent.
+        """
+        if self._welcome_sent:
+            return
+        self._welcome_sent = True
+        duration = int(self.vote_manager.duration)
+        await self._chat(
+            f"🎬 A new run is starting! Pick a character below — "
+            f"most-voted wins each {duration}s vote window."
+        )
+        await self._chat(
+            "How to vote: !N=pick option N | !pN=play potion N | !dN=discard potion N"
+        )
+        await self._chat(
+            "Info commands: !help | ?map | ?p (potion belt) | "
+            "?N (card in hand slot N) | ((card name)) (lookup any card)"
+        )
+
+    async def _announce_state_entry(self, state: GameState) -> None:
+        """Send a one-line chat announcement on first entry into a new state.
+
+        Suppressed when the same state_type+act+floor was just announced (within-state
+        re-queues, e.g. mid-combat hand changes). Also fires an act-transition line
+        when crossing into a new act.
+        """
+        if state.act is not None and state.act != self._last_seen_act:
+            if self._last_seen_act is not None:
+                await self._chat(f"🎬 Entering Act {state.act}!")
+            self._last_seen_act = state.act
+
+        key = f"{state.state_type}:{state.act}:{state.floor}"
+        if key == self._last_announced_state_key:
+            return
+        self._last_announced_state_key = key
+
+        msg = _format_state_announcement(state)
+        if msg is not None:
+            await self._chat(msg)
 
     async def event_ready(self) -> None:
         users = await self.fetch_users(ids=[self._owner_id])
@@ -547,7 +624,8 @@ class TwitchBot(commands.Bot):
         await self._handle_deck_select_event(broadcaster, "upgrade", "Smith upgrade", self._handle_smith_upgrade)
 
     async def _handle_vote_needed(self, event: VoteNeededEvent, broadcaster: twitchio.PartialUser) -> None:
-        """Handle a general VoteNeededEvent: auto-proceed shortcut, then run the vote."""
+        """Handle a general VoteNeededEvent: announce state entry, auto-proceed shortcut, then run the vote."""
+        await self._announce_state_entry(event.state)
         if await self._try_auto_proceed(event.state, broadcaster):
             return
 
@@ -1005,6 +1083,10 @@ class TwitchBot(commands.Bot):
     async def _handle_game_ended(self, event: GameEndedEvent) -> None:
         """Send end-of-run announcement, navigate post-run screens back to menu, then announce countdown."""
         logger.info("Game ended: %s", event.state.summary())
+        # Reset announcement flags so each new run gets a fresh welcome + state entries.
+        self._welcome_sent = False
+        self._last_announced_state_key = None
+        self._last_seen_act = None
         await self._chat("Run over! Thanks for playing.")
 
         # Navigate defeat/victory/unlock screens back to menu.
@@ -1165,6 +1247,7 @@ class TwitchBot(commands.Bot):
             f"!{opt}={_fmt(enabled[int(opt) - 1]['character_id'])}" for opt in options
         )
         asc_str = f" | Ascension {ascension}" if ascension else ""
+        await self._send_run_welcome()
         await self._chat(f"Choose your character{asc_str}: {char_list}")
 
         winner = await self.vote_manager.run_window(

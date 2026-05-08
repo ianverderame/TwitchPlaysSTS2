@@ -22,6 +22,10 @@ class VoteManager:
         self._options: frozenset[str] = frozenset()
 
     @property
+    def duration(self) -> float:
+        return self._duration
+
+    @property
     def is_open(self) -> bool:
         return self._open
 
