@@ -4,10 +4,10 @@
 `PoC`
 
 ## Recently Completed
+- #82 — Vote-start delay: `start_delay_seconds` (default 0) under `vote:` in settings.yaml; set to 6 for stream latency; post-delay stale check prevents wasted vote windows on mid-delay state transitions; 195 tests
 - #77 — fake_merchant: Foul Potion allowed at shop/fake_merchant (no target vote; API auto-infers merchant); 191 tests
-- #76 — Remove max_belt_size config: deleted `potions:` from settings/loader, dropped belt-full pre-check in `shop_item_available`, rewards now attempt-then-react; live-tested shop with full belt; 191 tests
-- #71 — Belt-full live test: fixed infinite-retry bug; `attempted_potion_indices` detects silent failure; live-tested discard-to-claim and skip paths; 191 tests
-- #75 — Pre-ship hardening & code cleanup: all 11 Part B hygiene items + 5 additional findings fixed; httpx retry with exponential backoff (configurable); TwitchIO reconnect guard; 195 tests; closes #9 and #61
+- #76 — Remove max_belt_size config: deleted `potions:` from settings/loader, dropped belt-full pre-check in `shop_item_available`, rewards now attempt-then-react; 191 tests
+- #75 — Pre-ship hardening & code cleanup: all 11 Part B hygiene items + 5 additional findings fixed; httpx retry with exponential backoff (configurable); TwitchIO reconnect guard; 195 tests
 
 ## Active Issue
 None

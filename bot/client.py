@@ -286,6 +286,7 @@ class TwitchBot(commands.Bot):
         self.vote_manager = VoteManager(config["vote"]["duration_seconds"])
         self._target_vote_duration: float = config["vote"]["target_duration_seconds"]
         self._smith_vote_duration: float = config["vote"].get("smith_vote_duration_seconds", 30.0)
+        self._vote_start_delay: float = config["vote"].get("start_delay_seconds", 0.0)
         self._auto_proceed_delay: float = config["game"].get("auto_proceed_delay_seconds", 3.0)
 
         game_cfg = config["game"]
@@ -541,6 +542,13 @@ class TwitchBot(commands.Bot):
                     break
             else:
                 logger.warning("Event state has no options after retries — falling back to static options")
+        await asyncio.sleep(self._vote_start_delay)
+        if self._vote_start_delay > 0:
+            post_delay_state = await self._fetch_parsed_state()
+            if post_delay_state is not None:
+                if self._is_stale_state(post_delay_state, event.state.state_type, "vote (post-delay)"):
+                    return
+                vote_state = post_delay_state
         winner = await self.vote_manager.run_window(
             broadcaster=broadcaster,
             bot_id=self.bot_id,
@@ -719,6 +727,7 @@ class TwitchBot(commands.Bot):
         target_options = [str(i + 1) for i in range(len(enemies))]
         target_labels = target_labels_for_enemies(enemies)
 
+        await asyncio.sleep(self._vote_start_delay)
         target_winner = await self.vote_manager.run_window(
             broadcaster=broadcaster,
             bot_id=self.bot_id,
@@ -815,6 +824,7 @@ class TwitchBot(commands.Bot):
         for chunk in _chunk_card_list(entries, separator=" | "):
             await self._chat(" | ".join(chunk))
 
+        await asyncio.sleep(self._vote_start_delay)
         winner = await self.vote_manager.run_window(
             broadcaster=broadcaster,
             bot_id=self.bot_id,
@@ -888,6 +898,7 @@ class TwitchBot(commands.Bot):
         reward_name = potion_item.get("description") or "potion"
         preamble = f"Belt full! Discard a potion to claim {reward_name}, or !skip to pass."
 
+        await asyncio.sleep(self._vote_start_delay)
         winner = await self.vote_manager.run_window(
             broadcaster=broadcaster,
             bot_id=self.bot_id,
@@ -1134,6 +1145,7 @@ class TwitchBot(commands.Bot):
         asc_str = f" | Ascension {ascension}" if ascension else ""
         await self._chat(f"Choose your character{asc_str}: {char_list}")
 
+        await asyncio.sleep(self._vote_start_delay)
         winner = await self.vote_manager.run_window(
             broadcaster=broadcaster,
             bot_id=self.bot_id,
