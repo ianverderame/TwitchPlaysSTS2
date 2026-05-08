@@ -8,7 +8,7 @@ vote:
   duration_seconds: 10  # How long each card/action voting window stays open
   target_duration_seconds: 10  # How long the target selection vote stays open
   smith_vote_duration_seconds: 30  # How long the smith upgrade card-selection vote stays open
-  start_delay_seconds: 6  # Delay before opening the vote window; set to your stream latency (e.g. 3)
+  stream_latency_seconds: 6  # Delay before announcing first-detection votes in chat, so the prompt arrives in sync with what stream-watchers see (chat is real-time; video is CDN-buffered). Set to your typical Twitch latency (e.g. 3 for Low Latency Mode, 6 for Normal). Sub-votes (target select, belt-full discard) skip the delay. 0 = no delay.
 
 game:
   poll_interval_seconds: 1     # How often to check STS2 game state
