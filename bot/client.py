@@ -956,6 +956,17 @@ class TwitchBot(commands.Bot):
                         skipped_indices.add(idx)
                     continue
 
+                # Belt capacity is known from API — skip the claim attempt; reactive fallbacks below cover old mod versions where max_potion_slots is absent
+                if is_potion and state.is_potion_belt_full() is True:
+                    logger.info(
+                        "Rewards: belt full (%d/%d) — triggering discard vote",
+                        len(state.player_potions), state.player_max_potion_slots,
+                    )
+                    winner = await self._handle_belt_full_potion_discard(broadcaster, state, auto_item)
+                    if winner == "skip":
+                        skipped_indices.add(idx)
+                    continue
+
                 await asyncio.sleep(self._auto_proceed_delay)
                 result = await self._game_client.post_action({"action": "claim_reward", "index": idx})
                 if result is None and is_potion:

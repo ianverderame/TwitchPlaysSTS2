@@ -79,6 +79,17 @@ def test_from_api_response_parses_potions():
     assert state.player_potions[0]["name"] == "Fire Potion"
 
 
+def test_from_api_response_parses_max_potion_slots():
+    data = {**MINIMAL_COMBAT_RESPONSE, "player": {**MINIMAL_COMBAT_RESPONSE["player"], "max_potion_slots": 5}}
+    state = GameState.from_api_response(data)
+    assert state.player_max_potion_slots == 5
+
+
+def test_from_api_response_max_potion_slots_absent_is_none():
+    state = GameState.from_api_response(MINIMAL_COMBAT_RESPONSE)
+    assert state.player_max_potion_slots is None
+
+
 def test_from_api_response_shop_items_from_shop_key():
     data = {
         "state_type": "shop",
@@ -103,6 +114,44 @@ def test_from_api_response_null_nested_keys_dont_crash():
     assert state.act is None
     assert state.player_hp is None
     assert state.enemies == []
+
+
+# --- is_potion_belt_full ---
+
+def test_is_potion_belt_full_true_when_at_capacity():
+    state = GameState(
+        state_type="rewards", act=1, floor=1, player_hp=80, player_max_hp=80,
+        player_potions=[{"slot": 0}, {"slot": 1}, {"slot": 2}],
+        player_max_potion_slots=3,
+    )
+    assert state.is_potion_belt_full() is True
+
+
+def test_is_potion_belt_full_false_when_space_remains():
+    state = GameState(
+        state_type="rewards", act=1, floor=1, player_hp=80, player_max_hp=80,
+        player_potions=[{"slot": 0}],
+        player_max_potion_slots=3,
+    )
+    assert state.is_potion_belt_full() is False
+
+
+def test_is_potion_belt_full_none_when_capacity_unknown():
+    state = GameState(
+        state_type="rewards", act=1, floor=1, player_hp=80, player_max_hp=80,
+        player_potions=[{"slot": 0}, {"slot": 1}, {"slot": 2}],
+        player_max_potion_slots=None,
+    )
+    assert state.is_potion_belt_full() is None
+
+
+def test_is_potion_belt_full_false_when_empty_with_capacity():
+    state = GameState(
+        state_type="rewards", act=1, floor=1, player_hp=80, player_max_hp=80,
+        player_potions=[],
+        player_max_potion_slots=3,
+    )
+    assert state.is_potion_belt_full() is False
 
 
 # --- is_combat_state ---
