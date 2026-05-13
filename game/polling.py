@@ -233,6 +233,13 @@ async def _handle_within_state(
     return curr
 
 
+#: Number of consecutive unexpected exceptions tolerated in the polling loop
+#: before the loop escalates by re-raising. Keeps the bot from quietly logging
+#: the same error every interval forever when something genuinely broken happens
+#: (e.g. an upstream API change that breaks state parsing).
+POLL_MAX_CONSECUTIVE_FAILURES: int = 10
+
+
 async def poll_game_state(
     client: STS2Client,
     interval: float,
@@ -244,6 +251,7 @@ async def poll_game_state(
     """Poll STS2MCP every `interval` seconds and emit typed GameEvents on state transitions."""
     previous_state: GameState | None = None
     api_reachable: bool = True
+    consecutive_failures: int = 0
 
     while True:
         try:
@@ -270,6 +278,21 @@ async def poll_game_state(
                         client, previous_state, state, event_queue,
                         action_signal, recheck_attempts, recheck_interval,
                     )
+            consecutive_failures = 0
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            logger.error("Unexpected error in polling loop", exc_info=True)
+            consecutive_failures += 1
+            logger.error(
+                "Unexpected error in polling loop (%d/%d consecutive)",
+                consecutive_failures,
+                POLL_MAX_CONSECUTIVE_FAILURES,
+                exc_info=True,
+            )
+            if consecutive_failures >= POLL_MAX_CONSECUTIVE_FAILURES:
+                logger.critical(
+                    "Polling loop hit %d consecutive failures — escalating",
+                    consecutive_failures,
+                )
+                raise
         await asyncio.sleep(interval)

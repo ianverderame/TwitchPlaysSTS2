@@ -27,6 +27,23 @@ _HELP_TEXT = (
 )
 
 
+def _log_event_runner_exit(task: asyncio.Task) -> None:
+    """done_callback for the event-runner task — surface unhandled exceptions.
+
+    Without this, a fire-and-forget `asyncio.create_task` swallows any exception
+    that escapes the inner coroutine (e.g. one raised before its `while True`),
+    leaving the bot running with no event runner and no log trace.
+    """
+    if task.cancelled():
+        logger.info("Event runner task cancelled")
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("Event runner task exited with unhandled exception", exc_info=exc)
+    else:
+        logger.warning("Event runner task exited cleanly (unexpected)")
+
+
 def _format_state_announcement(state: GameState) -> str | None:
     """Return a one-line chat announcement for entering this state, or None to skip.
 
@@ -336,6 +353,7 @@ class TwitchBot(commands.Bot):
         self.broadcaster: twitchio.PartialUser | None = None
         self._ready = asyncio.Event()  # set in event_ready; gates _event_runner
         self._connected_once = False   # guards against double-announce on TwitchIO reconnect
+        self._event_runner_task: asyncio.Task | None = None
 
         # Announcement tracking — reset on GameEndedEvent so each run starts fresh.
         self._welcome_sent: bool = False
@@ -364,7 +382,10 @@ class TwitchBot(commands.Bot):
         )
         await self.subscribe_websocket(payload=payload, as_bot=True)
 
-        asyncio.create_task(self._event_runner(), name="event-runner")
+        self._event_runner_task = asyncio.create_task(
+            self._event_runner(), name="event-runner"
+        )
+        self._event_runner_task.add_done_callback(_log_event_runner_exit)
 
     async def _chat(self, message: str) -> None:
         await self.broadcaster.send_message(
@@ -440,9 +461,17 @@ class TwitchBot(commands.Bot):
         broadcaster = self.broadcaster
 
         while True:
+            logger.debug("Event runner: waiting for event (queue size=%d)", self._event_queue.qsize())
+            # Bind `event` only after a successful get(); task_done() must be
+            # paired with a successful get(), so the try/finally that calls it
+            # wraps *handling*, not the get itself.
             try:
-                logger.debug("Event runner: waiting for event (queue size=%d)", self._event_queue.qsize())
                 event: GameEvent = await self._event_queue.get()
+            except asyncio.CancelledError:
+                logger.info("Event runner cancelled")
+                raise
+
+            try:
                 logger.info("Event runner: processing %s", type(event).__name__)
 
                 if isinstance(event, GameStartedEvent):
@@ -466,18 +495,16 @@ class TwitchBot(commands.Bot):
                     await self._handle_menu_select(broadcaster)
                 elif isinstance(event, VoteNeededEvent):
                     fresh = await self._check_vote_dispatch(event.state)
-                    if fresh is None:
-                        continue
-                    fresh_event = event if fresh is event.state else VoteNeededEvent(fresh)
-                    if fresh.state_type == "rewards":
-                        await self._handle_rewards(broadcaster)
-                    elif fresh.card_select_screen_type == "select":
-                        await self._handle_card_remove_event(fresh_event, broadcaster)
-                    elif fresh.card_select_screen_type == "upgrade":
-                        await self._handle_smith_upgrade_event(fresh_event, broadcaster)
-                    else:
-                        await self._handle_vote_needed(fresh_event, broadcaster)
-
+                    if fresh is not None:
+                        fresh_event = event if fresh is event.state else VoteNeededEvent(fresh)
+                        if fresh.state_type == "rewards":
+                            await self._handle_rewards(broadcaster)
+                        elif fresh.card_select_screen_type == "select":
+                            await self._handle_card_remove_event(fresh_event, broadcaster)
+                        elif fresh.card_select_screen_type == "upgrade":
+                            await self._handle_smith_upgrade_event(fresh_event, broadcaster)
+                        else:
+                            await self._handle_vote_needed(fresh_event, broadcaster)
             except asyncio.CancelledError:
                 logger.info("Event runner cancelled")
                 raise
