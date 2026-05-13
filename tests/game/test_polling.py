@@ -2,7 +2,13 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 import pytest
 
-from game.polling import poll_game_state
+from game.polling import (
+    poll_game_state,
+    detect_transition,
+    _mid_turn_change_reason,
+    recheck_after_action,
+)
+from game.state import GameState
 from game.events import VoteNeededEvent, MenuSelectNeededEvent, GameStartedEvent, GameEndedEvent
 
 
@@ -152,6 +158,146 @@ async def test_combat_new_round_detected_by_battle_round_increment():
     events = await _drain(client, q)
     vote_events = [e for e in events if isinstance(e, VoteNeededEvent)]
     assert len(vote_events) >= 2  # initial + new round
+
+
+def _state(state_type: str = "monster", **kwargs) -> GameState:
+    """Build a GameState with sensible defaults for helper tests."""
+    defaults = dict(
+        state_type=state_type,
+        act=None,
+        floor=None,
+        player_hp=None,
+        player_max_hp=None,
+    )
+    defaults.update(kwargs)
+    return GameState(**defaults)
+
+
+# --- detect_transition ---
+
+def test_detect_transition_initial_actionable_returns_vote():
+    curr = _state("monster")
+    ev = detect_transition(None, curr)
+    assert isinstance(ev, VoteNeededEvent)
+    assert ev.state is curr
+
+
+def test_detect_transition_initial_menu_returns_menu_select():
+    ev = detect_transition(None, _state("menu"))
+    assert isinstance(ev, MenuSelectNeededEvent)
+
+
+def test_detect_transition_initial_idle_returns_none():
+    assert detect_transition(None, _state("game_over")) is None
+
+
+def test_detect_transition_same_state_returns_none():
+    s = _state("map")
+    assert detect_transition(s, _state("map")) is None
+
+
+def test_detect_transition_menu_to_combat_returns_game_started():
+    ev = detect_transition(_state("menu"), _state("monster"))
+    assert isinstance(ev, GameStartedEvent)
+
+
+def test_detect_transition_to_game_over_returns_game_ended():
+    ev = detect_transition(_state("monster"), _state("game_over"))
+    assert isinstance(ev, GameEndedEvent)
+
+
+def test_detect_transition_combat_to_overlay_returns_game_ended():
+    ev = detect_transition(_state("monster"), _state("overlay"))
+    assert isinstance(ev, GameEndedEvent)
+
+
+def test_detect_transition_to_menu_returns_menu_select():
+    ev = detect_transition(_state("monster"), _state("menu"))
+    assert isinstance(ev, MenuSelectNeededEvent)
+
+
+def test_detect_transition_to_actionable_returns_vote():
+    ev = detect_transition(_state("monster"), _state("card_reward"))
+    assert isinstance(ev, VoteNeededEvent)
+
+
+def test_detect_transition_to_idle_non_overlay_returns_none():
+    # non-combat → unknown (idle): not game_over, prev not combat, no input needed
+    ev = detect_transition(_state("map"), _state("unknown"))
+    assert ev is None
+
+
+# --- _mid_turn_change_reason ---
+
+def test_mid_turn_reason_none_when_no_change():
+    prev = _state("monster", hand_size=3, playable_card_indices=[0, 1], player_potions=[], player_energy=3)
+    curr = _state("monster", hand_size=3, playable_card_indices=[0, 1], player_potions=[], player_energy=3)
+    assert _mid_turn_change_reason(prev, curr, None) is None
+
+
+def test_mid_turn_reason_action_signal():
+    prev = _state("monster", hand_size=3, player_energy=3)
+    curr = _state("monster", hand_size=3, player_energy=3)
+    sig = asyncio.Event()
+    sig.set()
+    assert _mid_turn_change_reason(prev, curr, sig) == "action_signal"
+
+
+def test_mid_turn_reason_hand_size():
+    prev = _state("monster", hand_size=3, player_energy=3)
+    curr = _state("monster", hand_size=2, player_energy=3)
+    assert _mid_turn_change_reason(prev, curr, None) == "hand_size"
+
+
+def test_mid_turn_reason_playable():
+    prev = _state("monster", hand_size=3, playable_card_indices=[0, 1], player_energy=3)
+    curr = _state("monster", hand_size=3, playable_card_indices=[0], player_energy=3)
+    assert _mid_turn_change_reason(prev, curr, None) == "playable"
+
+
+def test_mid_turn_reason_potions():
+    prev = _state("monster", hand_size=3, player_potions=[{"slot": 0}], player_energy=3)
+    curr = _state("monster", hand_size=3, player_potions=[], player_energy=3)
+    assert _mid_turn_change_reason(prev, curr, None) == "potions"
+
+
+def test_mid_turn_reason_energy():
+    prev = _state("monster", hand_size=3, player_energy=3)
+    curr = _state("monster", hand_size=3, player_energy=1)
+    assert _mid_turn_change_reason(prev, curr, None) == "energy"
+
+
+# --- recheck_after_action ---
+
+async def test_recheck_after_action_state_unchanged_returns_vote():
+    prev = _state("monster", hand_size=3, player_potions=[{"slot": 0}])
+    curr = _state("monster", hand_size=2, player_potions=[])
+    # Recheck polls return the same state_type
+    client = MagicMock()
+    client.get_state = AsyncMock(return_value={"state_type": "monster"})
+    final, event = await recheck_after_action(client, prev, curr, attempts=2, interval=0)
+    assert final.state_type == "monster"
+    assert isinstance(event, VoteNeededEvent)
+
+
+async def test_recheck_after_action_state_changed_to_overlay_returns_game_ended():
+    prev = _state("monster", hand_size=3)
+    curr = _state("monster", hand_size=2)
+    client = MagicMock()
+    client.get_state = AsyncMock(return_value={"state_type": "overlay"})
+    final, event = await recheck_after_action(client, prev, curr, attempts=2, interval=0)
+    assert final.state_type == "overlay"
+    assert isinstance(event, GameEndedEvent)
+
+
+async def test_recheck_after_action_state_changed_to_actionable_returns_vote():
+    prev = _state("monster", hand_size=3)
+    curr = _state("monster", hand_size=2)
+    client = MagicMock()
+    client.get_state = AsyncMock(return_value={"state_type": "card_reward"})
+    final, event = await recheck_after_action(client, prev, curr, attempts=2, interval=0)
+    assert final.state_type == "card_reward"
+    assert isinstance(event, VoteNeededEvent)
 
 
 async def test_combat_to_overlay_during_mid_turn_recheck_emits_game_ended():
