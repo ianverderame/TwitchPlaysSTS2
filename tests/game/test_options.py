@@ -101,6 +101,47 @@ def test_discard_offered_in_eligible_states():
         assert "d1" in opts, f"Expected d1 in options for state_type={st!r}"
 
 
+# --- Combat-only potions (issue #54) ---
+
+def _potion_full(slot: int, name: str, target_type: str = "Self", in_combat: bool = True,
+                 out_of_combat: bool = True, potion_id: str = "") -> dict:
+    return {
+        "slot": slot,
+        "id": potion_id,
+        "name": name,
+        "target_type": target_type,
+        "can_use_in_combat": in_combat,
+        "can_use_outside_combat": out_of_combat,
+    }
+
+
+def test_out_of_combat_excludes_combat_only_self_target_potion():
+    # Flex Potion: target_type=Self but can_use_outside_combat=False
+    potions = [_potion_full(0, "Flex Potion", target_type="Self", out_of_combat=False)]
+    state = make_state("rewards", player_potions=potions)
+    opts = options_for_state(state)
+    assert "p1" not in opts
+
+
+def test_out_of_combat_keeps_anywhere_self_target_potion():
+    # Fruit Juice: target_type=Self, can_use_outside_combat=True
+    potions = [_potion_full(0, "Fruit Juice", target_type="Self", out_of_combat=True)]
+    state = make_state("rewards", player_potions=potions)
+    opts = options_for_state(state)
+    assert "p1" in opts
+
+
+def test_in_combat_keeps_both_combat_only_and_anywhere_potions():
+    potions = [
+        _potion_full(0, "Flex Potion", target_type="Self", in_combat=True, out_of_combat=False),
+        _potion_full(1, "Fruit Juice", target_type="Self", in_combat=True, out_of_combat=True),
+    ]
+    state = make_state("monster", playable_card_indices=[0], player_potions=potions)
+    opts = options_for_state(state)
+    assert "p1" in opts
+    assert "p2" in opts
+
+
 # --- Shop options ---
 
 def _shop_item(index: int, stocked: bool = True, afford: bool = True, category: str = "card") -> dict:

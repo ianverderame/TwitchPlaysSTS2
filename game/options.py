@@ -97,6 +97,10 @@ def potion_vote_entries(state: GameState) -> tuple[list[tuple[str, str]], list[t
                 # All other enemy-targeting potions require combat and are blocked here.
                 if not (p.get("id") == _FOUL_POTION_ID and state.state_type in ("shop", "fake_merchant")):
                     continue
+            elif not p.get("can_use_outside_combat", True):
+                # Combat-only potions with non-enemy target_type (e.g. Flex, Energy,
+                # Strength, Block Potion) would error if used outside combat.
+                continue
         use_entries.append((f"{POTION_USE_PREFIX}{p['slot'] + 1}", potion_display_name(p)))
     discard_entries: list[tuple[str, str]] = (
         [(f"{POTION_DISCARD_PREFIX}{p['slot'] + 1}", potion_display_name(p)) for p in state.player_potions]
